@@ -1,5 +1,5 @@
 import './style.css';
-import { createPose, openCamera, assignSlots, prefetchAssets } from './pose.js';
+import { createPose, createPoseWorker, openCamera, assignSlots, prefetchAssets } from './pose.js';
 import { Player } from './scoring.js';
 import { Renderer, P_COLOR, GOLD, BONE } from './render.js';
 import { Recorder, shareOrDownload } from './record.js';
@@ -48,12 +48,14 @@ sizeCanvas();
 addEventListener('resize', () => { if (state !== 'running') sizeCanvas(); });
 
 // ---------- estado ----------
-let pose = null, stream = null, renderer = null, recorder = null;
+let pose = null, poseWorker = null, stream = null, renderer = null, recorder = null;
 let players = [new Player(0), new Player(1)];
 let activeCount = 1;
 let state = 'idle';
 let raf = 0, lastVideoTime = -1, lastT = 0, roundLeft = ROUND_SECONDS, blob = null;
-let prefetch = null, prefetchPct = 0, dapCool = 0;
+let prefetch = null, prefetchPct = 0, dapCool = 0, dapHold = 0;
+let crudos = [null, null];       // ultimos landmarks reales (para el scorer)
+let ultimaDeteccion = 0;         // segundos, para el dt real entre detecciones
 const mirror = true;   // camara frontal: espejo, si no se siente al reves
 
 // Suavizado exponencial de landmarks solo para el render.
@@ -81,6 +83,60 @@ function fail(msg) {
   show('oops');
 }
 
+// ---------- deteccion (desacoplada del render) ----------
+//
+// El scorer corre AL LLEGAR landmarks nuevos, no en cada frame de render.
+// Llamar update() a 60Hz con landmarks que solo cambian a 30Hz partia la
+// energia a la mitad en los frames repetidos.
+function onLandmarks(landmarks, tsMs) {
+  const t = tsMs / 1000;
+  const dt = ultimaDeteccion ? Math.min(t - ultimaDeteccion, 0.3) : 1 / 30;
+  ultimaDeteccion = t;
+
+  crudos = landmarks?.length ? assignSlots(landmarks) : [null, null];
+  if (landmarks?.length) activeCount = landmarks.length >= 2 ? 2 : 1;
+
+  if (state !== 'running') return;
+
+  players.forEach((p, i) => p.update(crudos[i], t));
+
+  // DAP: no es de un jugador, es del par. Se sostiene: con un solo frame
+  // coincidente cualquier mano que pasara cerca de la otra contaba.
+  if (activeCount === 2) {
+    dapCool -= dt;
+    dapHold = detectDap(crudos[0], crudos[1]) ? dapHold + dt : 0;
+    if (dapCool <= 0 && dapHold >= 0.2) {
+      dapCool = DAP.cd; dapHold = 0;
+      players.forEach((p) => { p.aura += DAP.bonus; p.landed.push(DAP.name); });
+      renderer.addSignature(DAP.name, DAP.bonus);
+      renderer.setLine(DAP.line, GOLD);
+    }
+  } else dapHold = 0;
+  players.forEach((p, i) => { if (i < activeCount) handleEvents(p, i); });
+}
+
+/** Empuja frames de camara al detector, sin bloquear el render. */
+function pedirDeteccion() {
+  const v = el.video;
+  if (v.readyState < 2) return;
+  // Solo frames NUEVOS de camara. Mandar el mismo frame otra vez gasta un
+  // createImageBitmap y hace que el worker repita inferencia sobre lo mismo.
+  if (v.currentTime === lastVideoTime) return;
+  if (poseWorker) {
+    if (!poseWorker.ocupado()) {
+      lastVideoTime = v.currentTime;
+      poseWorker.enviar(v, performance.now());
+    }
+    return;
+  }
+  // respaldo: hilo principal (bloquea, capa a ~30fps, pero funciona)
+  lastVideoTime = v.currentTime;
+  try {
+    const res = pose.detectForVideo(v, performance.now());
+    onLandmarks(res?.landmarks ?? [], performance.now());
+  } catch (e) { console.warn('[pose]', e?.message); }
+}
+
 async function boot() {
   el.go.disabled = true;
   show('loading');
@@ -98,7 +154,16 @@ async function boot() {
     el.loadmsg.textContent = prefetchPct >= 1 ? 'CALIBRANDO SENSORES…' : `DESCARGANDO SENSORES… ${Math.round(prefetchPct * 100)}%`;
     await prefetch;                       // ya venia bajando desde que abrio la pagina
     el.loadmsg.textContent = 'CALIBRANDO SENSORES…';
-    if (!pose) pose = await createPose(2);
+    // Worker primero: es lo unico que permite 60fps. Si no arranca, el
+    // detector del hilo principal sigue funcionando (a ~30fps).
+    if (!poseWorker && !pose) {
+      // ?hiloprincipal fuerza el camino viejo, para comparar rendimiento
+      if (!new URLSearchParams(location.search).has('hiloprincipal')) {
+        poseWorker = await createPoseWorker(2, onLandmarks);
+      }
+      if (!poseWorker) pose = await createPose(2);
+      console.info(poseWorker ? `[pose] worker (${poseWorker.delegate})` : '[pose] hilo principal');
+    }
     if (document.fonts?.ready) await document.fonts.ready;
   } catch (e) {
     console.error(e);
@@ -113,6 +178,8 @@ function countdown() {
   players = [new Player(0), new Player(1)];
   roundLeft = ROUND_SECONDS;
   stressFps = [];
+  ultimaDeteccion = 0;
+  dapCool = 0;
   state = 'countdown';
   lastT = performance.now() / 1000;
   loop();
@@ -163,43 +230,19 @@ function handleEvents(p, slot) {
 
 function loop() {
   raf = requestAnimationFrame(loop);
+  const trabajo0 = DEBUG ? performance.now() : 0;
   const now = performance.now();
   const t = now / 1000;
   const dt = Math.min(t - lastT, 0.15);
   lastT = t;
 
-  let found = [null, null];
-  if (el.video.readyState >= 2 && el.video.currentTime !== lastVideoTime) {
-    lastVideoTime = el.video.currentTime;
-    try {
-      const res = pose.detectForVideo(el.video, now);
-      if (res?.landmarks?.length) {
-        found = assignSlots(res.landmarks);
-        activeCount = res.landmarks.length >= 2 ? 2 : 1;
-      }
-    } catch (e) { console.warn('[pose]', e?.message); }
-  }
+  pedirDeteccion();
 
   const scoring = state === 'running';
-  players.forEach((p, i) => {
-    if (scoring) p.update(found[i], t);
-    // El scorer usa los landmarks crudos (la energia debe ser real).
-    // El dibujo usa una version suavizada: la deteccion llega a ~30Hz y
-    // pintarla tal cual a 60Hz se ve a saltos.
-    p.lm = smoothLm(i, found[i], dt);
-  });
-  // DAP: no es de un jugador, es del par. Se evalua sobre landmarks crudos.
-  if (scoring && activeCount === 2) {
-    dapCool -= dt;
-    if (dapCool <= 0 && detectDap(found[0], found[1])) {
-      dapCool = DAP.cd;
-      players.forEach((p) => { p.aura += DAP.bonus; p.landed.push(DAP.name); });
-      renderer.addSignature(DAP.name, DAP.bonus);
-      renderer.setLine(DAP.line, GOLD);
-    }
-  }
-
-  if (scoring) players.forEach((p, i) => { if (i < activeCount) handleEvents(p, i); });
+  // El scorer ya consumio los landmarks crudos en onLandmarks(). Aca solo
+  // se suaviza para dibujar: la deteccion llega a ~30Hz y pintarla tal cual
+  // a 60Hz se ve a saltos.
+  players.forEach((p, i) => { p.lm = smoothLm(i, crudos[i], dt); });
 
   if (scoring) {
     roundLeft -= dt;
@@ -215,6 +258,8 @@ function loop() {
   if (DEBUG) {
     fpsHist.push(fps);
     if (fpsHist.length > 45) fpsHist.shift();
+    window.__fps = fpsHist.reduce((a, b) => a + b, 0) / fpsHist.length;
+    window.__estado = state;
   }
   const fpsTag = DEBUG
     ? `  ·  ${(fpsHist.reduce((a, b) => a + b, 0) / fpsHist.length).toFixed(0)} FPS  ${el.canvas.width}p`
@@ -222,12 +267,19 @@ function loop() {
 
   const status = (state === 'running'
     ? `${roundLeft.toFixed(1)}s  ·  ${activeCount === 2 ? 'MODO VERSUS' : 'SUJETO ÚNICO'}`
-    : (found[0] ? 'SUJETO DETECTADO' : 'BUSCANDO SUJETO…')) + fpsTag;
+    : (crudos[0] ? 'SUJETO DETECTADO' : 'BUSCANDO SUJETO…')) + fpsTag;
 
   renderer.frame({
     video: el.video, mirror, players, active: activeCount, status, dt,
     stress: state === 'countdown',
   });
+
+  // Trabajo de hilo principal por frame: si pasa de 16.7ms, 60fps es
+  // imposible porque rAF cae al siguiente vsync (33.3ms = 30fps clavados).
+  if (DEBUG) {
+    (window.__trabajo ||= []).push(performance.now() - trabajo0);
+    if (window.__trabajo.length > 240) window.__trabajo.shift();
+  }
 }
 
 async function finish() {

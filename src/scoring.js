@@ -80,14 +80,19 @@ export class Player {
     // --- energia real ---
     let raw = 0;
     if (this.prev) {
-      let sum = 0, n = 0;
+      let sum = 0, n = 0, salto = 0;
       for (const i of TRACKED) {
         const vis = lm[i].visibility ?? 1;
         if (vis < 0.5) continue;
-        sum += dist(lm[i], this.prev[i]) / torso;
+        const d = dist(lm[i], this.prev[i]) / torso;
+        salto = Math.max(salto, d);
+        sum += d;
         n++;
       }
-      if (n) raw = sum / n / dt;
+      // Un cuerpo no se mueve un torso entero en un frame. Cuando pasa es
+      // que el tracker se perdio y volvio, o salto a otra persona. Medido en
+      // video real: producia picos de energia de 18 que inflaban el aura.
+      if (n && salto < 1.0) raw = sum / n / dt;
     }
     this.prev = lm.map((p) => ({ x: p.x, y: p.y, visibility: p.visibility }));
 
@@ -146,8 +151,10 @@ export class Player {
     this.moveCooldown -= dt;
 
     // --- nombre de move al detectar pico ---
-    if (this.energy > 3.0 && this.moveCooldown <= 0) {
-      this.moveCooldown = 1.7;
+    // Umbral alto: en video real la energia promedio de una persona
+    // bailando ya es ~3.6, asi que a 3.0 esto disparaba sin parar.
+    if (this.energy > 6.5 && this.moveCooldown <= 0) {
+      this.moveCooldown = 3.0;
       this.emit('move', moveName(), Math.round(gain * 9));
     }
 

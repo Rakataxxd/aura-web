@@ -22,6 +22,10 @@ if (!remote) {
 // Pages ignora archivos que empiezan con _ salvo que exista .nojekyll
 writeFileSync(resolve(DIST, '.nojekyll'), '');
 
+// El video de prueba vive en public/ para que Vite lo sirva en dev, pero
+// no tiene por que publicarse (son varios MB que nadie descarga).
+rmSync(resolve(DIST, 'testdata'), { recursive: true, force: true });
+
 rmSync(resolve(DIST, '.git'), { recursive: true, force: true });
 run('git init -q');
 run('git checkout -q -b gh-pages');

@@ -29,7 +29,8 @@ function selfie(make = base) {
 
 const POSES = {
   't-pose': () => { const l = base(); l[13] = P(0.28, 0.30); l[14] = P(0.72, 0.30); l[15] = P(0.13, 0.30); l[16] = P(0.87, 0.30); return l; },
-  'manos-arriba': () => { const l = base(); l[13] = P(0.42, 0.20); l[14] = P(0.58, 0.20); l[15] = P(0.44, 0.05); l[16] = P(0.56, 0.05); return l; },
+  // brazos estirados de verdad: shoulder->wrist ~1 torso, como un adulto
+  'manos-arriba': () => { const l = base(); l[13] = P(0.42, 0.16); l[14] = P(0.58, 0.16); l[15] = P(0.44, 0.02); l[16] = P(0.56, 0.02); return l; },
   'scuba': () => { const l = base(); l[13] = P(0.34, 0.30); l[14] = P(0.66, 0.30); l[15] = P(0.44, 0.19); l[16] = P(0.56, 0.19); return l; },
   'mewing': () => { const l = base(); l[14] = P(0.64, 0.32); l[16] = P(0.56, 0.24); return l; },
   'rezo': () => { const l = base(); l[13] = P(0.38, 0.40); l[14] = P(0.62, 0.40); l[15] = P(0.49, 0.40); l[16] = P(0.51, 0.40); return l; },
@@ -47,21 +48,42 @@ const POSES_SELFIE = {
 };
 
 /** 6-7: manos al pecho alternando arriba y abajo. */
+/**
+ * 6-7 real: manos ABIERTAS hacia afuera a la altura del pecho, palmas
+ * arriba, antebrazos casi horizontales, codos pegados al cuerpo y casi
+ * quietos mientras las manos alternan. Esa geometria es la que lo separa
+ * de mover los brazos en general.
+ */
 function sixSeven(phase) {
   const l = base();
-  const d = Math.sin(phase) * 0.075;
-  // los codos acompañan a las munecas: si se quedan fijos el angulo del
-  // brazo se vuelve absurdo en los extremos y la pose deja de ser realista
-  l[13] = P(0.34, 0.42 + d * 0.5); l[14] = P(0.66, 0.42 - d * 0.5);
-  l[15] = P(0.36, 0.44 + d); l[16] = P(0.64, 0.44 - d);
+  const d = Math.sin(phase) * 0.07;
+  l[13] = P(0.36, 0.42 + d * 0.12); l[14] = P(0.64, 0.42 - d * 0.12);  // codos casi fijos
+  l[15] = P(0.22, 0.44 + d); l[16] = P(0.78, 0.44 - d);                // manos afuera
   return l;
 }
 
-/** Giro: los hombros colapsan (perfil) y vuelven a abrirse. */
+/**
+ * Giro: de frente -> perfil -> de frente PERO con los hombros invertidos.
+ * Arranca de frente a proposito: el detector se auto-normaliza contra el
+ * ancho maximo reciente del propio cuerpo, asi que necesita verlo abierto.
+ */
 function spin(frac) {
   const l = base();
-  const w = frac < 0.5 ? 0.012 : 0.07;   // angosto -> ancho
+  const perfil = () => { l[11] = P(0.48, 0.30); l[12] = P(0.52, 0.30); };
+  const alReves = () => { l[11] = P(0.57, 0.30); l[12] = P(0.43, 0.30); };
+  if (frac < 0.18) return l;              // de frente
+  if (frac < 0.34) { perfil(); return l; }
+  if (frac < 0.55) { alReves(); return l; }   // de espaldas: hombros invertidos
+  if (frac < 0.70) { perfil(); return l; }
+  return l;                               // de frente otra vez: vuelta completa
+}
+
+/** Corredor de perfil: la nariz va por delante del hombro. No debe girar. */
+function corriendo(frac) {
+  const l = base();
+  const w = 0.022;
   l[11] = P(0.5 - w, 0.30); l[12] = P(0.5 + w, 0.30);
+  l[0] = P(0.5 + (frac < 0.5 ? 0.06 : -0.06), 0.18);   // nariz fuera del torso
   return l;
 }
 
@@ -112,9 +134,17 @@ export function run() {
   {
     const det = new MoveDetector();
     const hits = new Set();
-    for (let f = 0; f < 40; f++) det.feed(spin(f / 40), dt).forEach((m) => hits.add(m.id));
+    for (let f = 0; f < 55; f++) det.feed(spin(f / 55), dt).forEach((m) => hits.add(m.id));
     out.detectados['giro'] = [...hits];
     if (!hits.has('giro')) out.no_detectados.push('giro');
+  }
+
+  // --- corredor de perfil: no debe disparar NADA (caso del video real) ---
+  {
+    const det = new MoveDetector();
+    const hits = new Set();
+    for (let f = 0; f < 120; f++) det.feed(corriendo(f / 120), dt).forEach((m) => hits.add(m.id));
+    out.corriendo_de_perfil_falsos = [...hits];
   }
 
   // --- dap (dos personas) ---

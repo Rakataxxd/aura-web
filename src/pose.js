@@ -35,6 +35,63 @@ export async function prefetchAssets(onProgress) {
   onProgress?.(1);
 }
 
+/**
+ * Detector en worker. El render nunca se bloquea esperando la inferencia.
+ * Si el worker no arranca (Safari viejo, sin OffscreenCanvas), devuelve null
+ * y quien llama cae al detector del hilo principal.
+ */
+export async function createPoseWorker(numPoses = 2, onResult) {
+  let worker;
+  try {
+    // Clasico, no modulo: MediaPipe necesita importScripts para su WASM.
+    worker = new Worker(`${BASE}pose-worker.js`);
+  } catch (e) {
+    console.warn('[pose] no se pudo crear el worker:', e?.message);
+    return null;
+  }
+
+  const listo = await new Promise((res) => {
+    const t = setTimeout(() => res({ ok: false, error: 'timeout' }), 20000);
+    worker.addEventListener('message', function onMsg(ev) {
+      if (ev.data?.type !== 'ready') return;
+      clearTimeout(t);
+      worker.removeEventListener('message', onMsg);
+      res(ev.data);
+    });
+    worker.postMessage({ type: 'init', base: new URL(BASE, location.href).href, numPoses });
+  });
+
+  if (!listo.ok) {
+    console.warn('[pose] worker no inicializo:', listo.error);
+    worker.terminate();
+    return null;
+  }
+
+  let enVuelo = false;
+  worker.addEventListener('message', (ev) => {
+    if (ev.data?.type !== 'result') return;
+    enVuelo = false;
+    onResult(ev.data.landmarks, ev.data.ts);
+  });
+
+  return {
+    delegate: listo.delegate,
+    ocupado: () => enVuelo,
+    /** Manda un frame. No hace nada si el worker sigue con el anterior. */
+    async enviar(video, ts) {
+      if (enVuelo) return;
+      enVuelo = true;
+      try {
+        const bitmap = await createImageBitmap(video);
+        worker.postMessage({ type: 'frame', bitmap, ts }, [bitmap]);
+      } catch {
+        enVuelo = false;
+      }
+    },
+    cerrar() { worker.terminate(); },
+  };
+}
+
 export async function createPose(numPoses = 2) {
   const fileset = await FilesetResolver.forVisionTasks(`${BASE}mp`);
   // GPU es ~3x mas rapido; en algunos Android viejos falla -> caemos a CPU

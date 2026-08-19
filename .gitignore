@@ -2,3 +2,6 @@ node_modules
 dist
 *.local
 .DS_Store
+
+# video de prueba: solo para verificar deteccion en local, no se publica
+public/testdata
