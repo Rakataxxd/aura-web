@@ -54,6 +54,7 @@ let activeCount = 1;
 let state = 'idle';
 let raf = 0, lastVideoTime = -1, lastT = 0, roundLeft = ROUND_SECONDS, blob = null;
 let prefetch = null, prefetchPct = 0, dapCool = 0, dapHold = 0;
+let framesRonda = 0, inicioRonda = 0, fpsClip = 0;
 let crudos = [null, null];       // ultimos landmarks reales (para el scorer)
 let ultimaDeteccion = 0;         // segundos, para el dt real entre detecciones
 const mirror = true;   // camara frontal: espejo, si no se siente al reves
@@ -197,15 +198,23 @@ function countdown() {
       // rompe el encoder, por eso la decision se toma aca.
       if (!downscaled && stressFps.length > 20) {
         const avg = stressFps.reduce((a, b) => a + b, 0) / stressFps.length;
-        if (avg < 48) {
+        // Escalonado: si el aparato no llega a 60fps, lo que arruina el clip
+        // es la resolucion, no los efectos. Mejor 540p a 60fps que 720p a 30.
+        const escala = avg >= 52 ? 1 : (avg >= 40 ? 0.75 : 0.6);
+        if (escala < 1) {
           downscaled = true;
-          el.canvas.width = 540; el.canvas.height = 960;
+          const portrait = el.canvas.height >= el.canvas.width;
+          const [W, H] = portrait ? [720, 1280] : [1280, 720];
+          el.canvas.width = Math.round(W * escala / 2) * 2;
+          el.canvas.height = Math.round(H * escala / 2) * 2;
           fitCanvasCss();
           renderer = new Renderer(el.canvas);
-          console.info(`[perf] ${avg.toFixed(0)} FPS en la prueba -> bajo a 540x960`);
+          console.info(`[perf] ${avg.toFixed(0)} FPS en la prueba -> ${el.canvas.width}x${el.canvas.height}`);
         }
       }
       state = 'running';
+      framesRonda = 0;
+      inicioRonda = performance.now();
       recorder.start(60);
       return;
     }
@@ -245,6 +254,7 @@ function loop() {
   players.forEach((p, i) => { p.lm = smoothLm(i, crudos[i], dt); });
 
   if (scoring) {
+    framesRonda++;      // frames que realmente entraron al clip
     roundLeft -= dt;
     if (roundLeft <= 0) { finish(); return; }
   }
@@ -284,6 +294,11 @@ function loop() {
 
 async function finish() {
   state = 'ending';
+  // Cuadros por segundo REALES del clip: el canvas solo se captura cuando
+  // se redibuja, asi que este es el numero que de verdad tiene el archivo.
+  // captureStream(60) es el techo: el clip nunca puede tener mas de 60,
+  // aunque el bucle dibuje mas rapido.
+  fpsClip = Math.min(60, framesRonda / Math.max((performance.now() - inicioRonda) / 1000, 0.001));
   blob = await recorder.stop();
   cancelAnimationFrame(raf);
   stream?.getTracks().forEach((t) => t.stop());
@@ -305,6 +320,7 @@ async function finish() {
     `COMBO MÁX <b>${p.combo}</b>`,
     activeCount === 2 ? `GANADOR <b>P${winner + 1}</b>` : `MODO <b>SOLO</b>`,
     ...landed.map((n) => `<b>${n}</b>`),
+    ...(DEBUG ? [`CLIP <b>${fpsClip.toFixed(0)} FPS · ${el.canvas.width}×${el.canvas.height}</b>`] : []),
   ].map((s) => `<span>${s}</span>`).join('');
   el.rSub.textContent = landed.length
     ? `${v.s}  Reconocí: ${landed.join(', ')}.`

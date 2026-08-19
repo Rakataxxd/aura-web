@@ -15,7 +15,7 @@
 
 import { NOSE, L_SH, R_SH, L_EL, R_EL, L_WR, R_WR, L_HIP, R_HIP, L_KN, R_KN, L_AN, R_AN } from './landmarks.js';
 
-const VIS = 0.6;
+const VIS = 0.45;
 const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const seen = (lm, i) => (lm[i].visibility ?? 1) >= VIS;
@@ -37,12 +37,14 @@ function tilt(a, b) {
 }
 
 export function buildCtx(lm) {
-  if (!allSeen(lm, [L_SH, R_SH, NOSE])) return null;
+  if (!allSeen(lm, [L_SH, R_SH])) return null;
   const sc = mid(lm[L_SH], lm[R_SH]);
   const hc = mid(lm[L_HIP], lm[R_HIP]);
 
   const SW = dist(lm[L_SH], lm[R_SH]);
-  const F = dist(lm[NOSE], sc);
+  // Sin nariz visible se estima la escala de cara desde los hombros. Exigir
+  // la nariz aca tumbaba TODOS los moves, hasta los que no miran la cara.
+  const F = seen(lm, NOSE) ? dist(lm[NOSE], sc) : SW * 0.55;
   const hipsOk = allSeen(lm, [L_HIP, R_HIP]);
 
   let T = hipsOk ? dist(sc, hc) : 0;
@@ -83,35 +85,33 @@ export const MOVES = [
     line: 'SEIS… SIETE. CONFIRMADO.',
   },
   {
-    id: 'scuba', name: 'SCUBA', bonus: 15000, hold: 0.35, cd: 5, calm: 2.2,
+    id: 'scuba', name: 'SCUBA', bonus: 15000, hold: 0.22, cd: 5, calm: 4.0,
     needs: FACE_ARMS,
     line: 'INMERSIÓN DETECTADA',
-    // Las dos manos enmarcando los OJOS: cerca de la cara, a esa altura,
-    // simetricas y una a cada lado. Antes bastaba "manos cerca de la
-    // cabeza", que es rascarse el pelo.
+    // Las dos manos enmarcando la cara, una a cada lado. Lo que lo separa
+    // de rascarse el pelo es la simetria y que esten a los costados, no
+    // la precision milimetrica.
     test: (c) => {
-      if (!(c.fL < 1.05 && c.fR < 1.05)) return false;
-      const lo = c.nose.y - c.F * 0.95, hi = c.nose.y + c.F * 0.25;
+      if (!(c.fL < 1.5 && c.fR < 1.5)) return false;
+      const lo = c.nose.y - c.F * 1.25, hi = c.nose.y + c.F * 1.0;
       if (!(c.lm[L_WR].y > lo && c.lm[L_WR].y < hi)) return false;
       if (!(c.lm[R_WR].y > lo && c.lm[R_WR].y < hi)) return false;
-      if (Math.abs(c.lm[L_WR].y - c.lm[R_WR].y) > c.F * 0.5) return false;   // simetria
+      if (Math.abs(c.lm[L_WR].y - c.lm[R_WR].y) > c.F * 0.9) return false;   // simetria
       const dl = c.lm[L_WR].x - c.nose.x, dr = c.lm[R_WR].x - c.nose.x;
-      if (dl * dr >= 0) return false;                                        // una a cada lado
-      if (Math.abs(dl) < c.F * 0.15 || Math.abs(dr) < c.F * 0.15) return false;
-      return c.lElbow > 30 && c.lElbow < 140 && c.rElbow > 30 && c.rElbow < 140;
+      return dl * dr < 0                                                     // una a cada lado
+        && c.lElbow > 12 && c.lElbow < 165 && c.rElbow > 12 && c.rElbow < 165;
     },
   },
   {
-    id: 'mewing', name: 'MEWING', bonus: 14000, hold: 0.5, cd: 5, calm: 1.6,
+    id: 'mewing', name: 'MEWING', bonus: 14000, hold: 0.3, cd: 5, calm: 3.5,
     needs: FACE_ARMS,
     line: 'LÍNEA MAXILAR CONFIRMADA',
-    // UNA mano en la mandibula (debajo de la nariz, arriba de los hombros)
-    // y la otra claramente lejos. Ese contraste lo separa del scuba.
+    // UNA mano junto a la cara y la otra claramente lejos. Ese contraste
+    // es lo unico que hace falta para separarlo del scuba.
     test: (c) => {
-      const una = (near, far, wr) => near < 1.0 && far > 2.2
-        && wr.y > c.nose.y + c.F * 0.35
-        && wr.y < c.sc.y
-        && Math.abs(wr.x - c.nose.x) < c.F * 0.9;
+      const una = (near, far, wr) => near < 1.4 && far > 1.9
+        && wr.y > c.nose.y - c.F * 0.15
+        && wr.y < c.sc.y + c.F * 0.4;
       return una(c.fL, c.fR, c.lm[L_WR]) || una(c.fR, c.fL, c.lm[R_WR]);
     },
   },
@@ -121,38 +121,41 @@ export const MOVES = [
     line: 'ROTACIÓN NO AUTORIZADA',
   },
   {
-    id: 't-pose', name: 'T-POSE', bonus: 11000, hold: 0.5, cd: 6, calm: 1.8,
+    id: 't-pose', name: 'T-POSE', bonus: 11000, hold: 0.3, cd: 6, calm: 4.0,
     needs: ARMS,
     line: 'AFIRMANDO DOMINANCIA',
-    test: (c) => c.lElbow > 155 && c.rElbow > 155
-      && Math.abs(c.lWr.y) < 0.38 && Math.abs(c.rWr.y) < 0.38
-      && Math.abs(c.lWr.x) > 1.3 && Math.abs(c.rWr.x) > 1.3
-      && Math.abs(c.lWr.y - c.rWr.y) < 0.4,
+    test: (c) => c.lElbow > 142 && c.rElbow > 142
+      && Math.abs(c.lWr.y) < 0.6 && Math.abs(c.rWr.y) < 0.6
+      && Math.abs(c.lWr.x) > 1.0 && Math.abs(c.rWr.x) > 1.0
+      && Math.abs(c.lWr.y - c.rWr.y) < 0.7,
   },
   {
-    id: 'sentadilla', name: 'BAJANDO', bonus: 9000, hold: 0.4, cd: 5, calm: 2.5,
-    needs: [L_HIP, R_HIP, L_KN, R_KN, L_AN, R_AN],
+    id: 'sentadilla', name: 'BAJANDO', bonus: 9000, hold: 0.3, cd: 5, calm: 5.0,
+    needs: [L_HIP, R_HIP, L_KN, R_KN],
     line: 'HASTA EL SUELO',
-    test: (c) => c.hipsOk && c.hip.y > c.knee.y - 0.18
-      && Math.abs(c.n(c.lm[L_KN]).y - c.n(c.lm[R_KN]).y) < 0.3
-      && c.lAn.y > c.knee.y + 0.15 && c.rAn.y > c.knee.y + 0.15,
+    test: (c) => c.hipsOk && c.hip.y > c.knee.y - 0.38
+      && Math.abs(c.n(c.lm[L_KN]).y - c.n(c.lm[R_KN]).y) < 0.5,
   },
   {
-    id: 'manos-arriba', name: 'MANOS ARRIBA', bonus: 8000, hold: 0.45, cd: 5, calm: 2.0,
+    id: 'manos-arriba', name: 'MANOS ARRIBA', bonus: 8000, hold: 0.28, cd: 5, calm: 4.5,
     needs: [L_SH, R_SH, L_EL, R_EL, L_WR, R_WR],
-    // brazos estirados hacia arriba, no simplemente manos altas de pasada
     line: 'INVOCANDO ALGO',
-    test: (c) => c.lWr.y < -0.88 && c.rWr.y < -0.88
+    test: (c) => c.lWr.y < -0.55 && c.rWr.y < -0.55
       && c.lWr.y < c.lEl.y && c.rWr.y < c.rEl.y
-      && c.lElbow > 130 && c.rElbow > 130,
+      && c.lElbow > 105 && c.rElbow > 105,
   },
   {
-    id: 'rezo', name: 'PLEGARIA', bonus: 7000, hold: 0.6, cd: 6, calm: 1.2,
+    id: 'rezo', name: 'PLEGARIA', bonus: 7000, hold: 0.35, cd: 6, calm: 3.0,
     needs: ARMS,
     line: 'PIDIENDO AYUDA SUPERIOR',
-    test: (c) => c.wristGap < 0.28 && c.lWr.y > -0.45 && c.lWr.y < 0.65
-      && c.lElbow < 110 && c.rElbow < 110
-      && Math.abs(c.lWr.x) < 0.5 && Math.abs(c.rWr.x) < 0.5,
+    // Manos juntas AL PECHO, claramente debajo de la cara. Sin esa
+    // condicion el scuba (manos juntas a la altura de los ojos) tambien
+    // disparaba plegaria.
+    test: (c) => c.wristGap < 0.45
+      && c.lm[L_WR].y > c.nose.y + c.F * 0.7
+      && c.lWr.y < 0.85
+      && c.lElbow < 140 && c.rElbow < 140
+      && Math.abs(c.lWr.x) < 0.8 && Math.abs(c.rWr.x) < 0.8,
   },
 ];
 
@@ -170,12 +173,18 @@ export class MoveDetector {
     this.t = 0;
   }
 
-  /** Velocidad de muñeca en torsos/segundo, promediada en la ventana. */
-  velMuneca() {
+  /**
+   * Velocidad de muñeca en torsos/segundo, SOLO del tramo reciente.
+   * Promediar los 2.2s enteros era un bug: si te movias y despues hacias
+   * la pose, el promedio seguia alto por lo de antes y la pose nunca
+   * contaba como quieta. Bloqueaba casi todos los moves.
+   */
+  velMuneca(ventana = 0.3) {
     const h = this.hist;
     if (h.length < 3) return 0;
     let s = 0, n = 0;
-    for (let i = 1; i < h.length; i++) {
+    for (let i = h.length - 1; i > 0; i--) {
+      if (this.t - h[i].t > ventana) break;
       const dt = h[i].t - h[i - 1].t;
       if (dt <= 0) continue;
       s += (Math.hypot(h[i].lWr.x - h[i - 1].lWr.x, h[i].lWr.y - h[i - 1].lWr.y)
@@ -233,18 +242,18 @@ export class MoveDetector {
     // Lo que lo distingue de mover los brazos en general: los CODOS quedan
     // pegados al cuerpo y casi no se mueven, mientras las manos suben y
     // bajan alternadas, con los antebrazos casi horizontales.
-    const codosPegados = Math.abs(c.lEl.x) < 0.85 && Math.abs(c.rEl.x) < 0.85;
-    const antebrazosPlanos = tilt(c.lm[L_EL], c.lm[L_WR]) < 42 && tilt(c.lm[R_EL], c.lm[R_WR]) < 42;
-    const manosAlFrente = Math.abs(c.lWr.x) < 1.35 && Math.abs(c.rWr.x) < 1.35;
-    const alturaPecho = c.lWr.y > -0.2 && c.lWr.y < 1.15 && c.rWr.y > -0.2 && c.rWr.y < 1.15;
+    const codosPegados = Math.abs(c.lEl.x) < 1.25 && Math.abs(c.rEl.x) < 1.25;
+    const antebrazosPlanos = tilt(c.lm[L_EL], c.lm[L_WR]) < 62 && tilt(c.lm[R_EL], c.lm[R_WR]) < 62;
+    const manosAlFrente = Math.abs(c.lWr.x) < 1.8 && Math.abs(c.rWr.x) < 1.8;
+    const alturaPecho = c.lWr.y > -0.5 && c.lWr.y < 1.5 && c.rWr.y > -0.5 && c.rWr.y < 1.5;
     const posture = allSeen(lm, ARMS) && codosPegados && antebrazosPlanos
-      && manosAlFrente && alturaPecho && c.wristGap > 0.65
-      && c.lElbow > 45 && c.lElbow < 145 && c.rElbow > 45 && c.rElbow < 145;
+      && manosAlFrente && alturaPecho && c.wristGap > 0.45
+      && c.lElbow > 28 && c.lElbow < 162 && c.rElbow > 28 && c.rElbow < 162;
 
     if (posture) {
-      this.postureGrace = 0.3;
+      this.postureGrace = 0.35;
       const d = c.lWr.y - c.rWr.y;
-      const s = Math.abs(d) > 0.25 ? Math.sign(d) : 0;
+      const s = Math.abs(d) > 0.16 ? Math.sign(d) : 0;
       if (s !== 0 && s !== this.lastSign) {
         if (this.lastSign !== 0) this.flips.push(this.t);
         this.lastSign = s;
@@ -253,12 +262,13 @@ export class MoveDetector {
       this.postureGrace -= dt;
       if (this.postureGrace <= 0) { this.lastSign = 0; this.flips.length = 0; }
     }
-    this.flips = this.flips.filter((x) => this.t - x < 2.2);
-    // Las manos tienen que recorrer bastante mas que los codos: si todo el
-    // brazo viaja junto es baile, no 6-7.
+    this.flips = this.flips.filter((x) => this.t - x < 2.5);
+    // Las manos tienen que recorrer mas que los codos: si todo el brazo
+    // viaja junto es baile, no 6-7. Este es el discriminador que importa,
+    // por eso se conserva aunque todo lo demas se haya aflojado.
     const manos = this.recorrido('lWr') + this.recorrido('rWr');
     const codos = this.recorrido('lEl') + this.recorrido('rEl');
-    if (this.flips.length >= 4 && manos > codos * 2.2) {
+    if (this.flips.length >= 3 && manos > codos * 1.5) {
       this.flips = [];
       fire(BY_ID['six-seven']);
     }

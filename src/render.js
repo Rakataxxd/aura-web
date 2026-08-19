@@ -116,11 +116,13 @@ export class Renderer {
     const w = vw * s, h = vh * s;
     x.save();
     if (mirror) { x.translate(c.width, 0); x.scale(-1, 1); }
+    // El video se dibuja translucido sobre el fondo tinta: queda igual de
+    // apagado que con un rectangulo oscuro encima, pero es UNA pasada de
+    // pantalla completa en vez de dos. A 60fps eso son ~900k pixeles menos
+    // por frame.
+    x.globalAlpha = 0.7;
     x.drawImage(video, (c.width - w) / 2, (c.height - h) / 2, w, h);
     x.restore();
-    // el video crudo compite con el HUD -> lo apago un poco
-    x.fillStyle = 'rgba(10,10,12,0.30)';
-    x.fillRect(0, 0, c.width, c.height);
   }
 
   drawScreentone(intensity) {
@@ -370,8 +372,10 @@ export class Renderer {
     this.flash = Math.max(0, this.flash - dt * 3.4);
 
     const maxE = Math.max(...players.map((p) => p.energy), 0);
-    // stress: fuerza los efectos caros para medir el costo real antes de grabar
-    const toneI = stress ? 0.9 : clamp(maxE / 5, 0, 1);
+    // stress: fuerza los efectos caros para medir el costo real antes de grabar.
+    // La trama arranca recien en los picos: antes salia con casi cualquier
+    // movimiento, o sea una pasada de pantalla completa en todos los frames.
+    const toneI = stress ? 0.9 : clamp((maxE - 2.5) / 3, 0, 1);
     const rayI = stress ? 0.7 : clamp((maxE - 3.6) / 4, 0, 1) * 0.8 + this.flash * 0.5;
 
     x.save();
@@ -380,6 +384,8 @@ export class Renderer {
       x.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
     }
 
+    // Obligatorio: el video se dibuja translucido encima, asi que sin
+    // limpiar quedaria el frame anterior debajo dejando estelas.
     x.fillStyle = INK;
     x.fillRect(-50, -50, c.width + 100, c.height + 100);
     this.drawVideo(video, mirror);

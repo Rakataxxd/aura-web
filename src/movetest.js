@@ -87,6 +87,35 @@ function corriendo(frac) {
   return l;
 }
 
+// LCG determinista: los tests tienen que dar siempre lo mismo.
+function rng(seed) {
+  let s = seed >>> 0;
+  return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296) * 2 - 1;
+}
+
+/**
+ * Version DESPROLIJA de una pose: como la hace una persona real.
+ * - ruido de landmark (MediaPipe tiembla ~0.005 aunque no te muevas)
+ * - la pose no llega al extremo, se queda al 80% del camino
+ * - visibility mediocre
+ * - balanceo lento del cuerpo
+ *
+ * Este es el test que faltaba. Con poses perfectas y perfectamente
+ * quietas todo pasaba, y por eso no detecte que habia apretado de mas.
+ */
+function desprolijo(make, f, seed = 7, flojera = 0.2) {
+  const r = rng(seed + f * 31);
+  const base0 = base();
+  const l = make();
+  const drift = Math.sin(f * 0.07) * 0.012;
+  return l.map((p, i) => ({
+    x: p.x + (p.x - base0[i].x) * -flojera + r() * 0.005 + drift,
+    y: p.y + (p.y - base0[i].y) * -flojera + r() * 0.005,
+    z: 0,
+    visibility: 0.68,
+  }));
+}
+
 export function run() {
   const dt = 1 / 30;
   const out = { detectados: {}, falsos_positivos: [], no_detectados: [] };
@@ -102,6 +131,37 @@ export function run() {
       out.detectados[id] = [...hits];
       if (!hits.has(id)) out.no_detectados.push(id);
     }
+  }
+
+  // --- las mismas poses pero DESPROLIJAS (como las hace una persona) ---
+  out.desprolijo = {};
+  for (const [id, make] of Object.entries(POSES)) {
+    if (id === 'neutral') continue;
+    const det = new MoveDetector();
+    const hits = new Set();
+    for (let f = 0; f < 40; f++) det.feed(desprolijo(make, f), dt).forEach((m) => hits.add(m.id));
+    out.desprolijo[id] = [...hits];
+    if (!hits.has(id)) out.no_detectados.push(`desprolijo:${id}`);
+  }
+
+  // --- moverse MUCHO y despues hacer la pose ---
+  // Escenario exacto del bug: el filtro de quietud promediaba toda la
+  // ventana, asi que lo que hiciste antes bloqueaba la pose de despues.
+  out.moverse_y_luego_posar = {};
+  for (const [id, make] of Object.entries(POSES)) {
+    if (id === 'neutral') continue;
+    const det = new MoveDetector();
+    const hits = new Set();
+    for (let f = 0; f < 45; f++) {           // 1.5s sacudiendose
+      const l = base();
+      const s = Math.sin(f * 0.9) * 0.16;
+      l[15] = P(0.40 + s, 0.54 - s); l[16] = P(0.60 - s, 0.54 + s);
+      l[13] = P(0.41 + s, 0.42); l[14] = P(0.59 - s, 0.42);
+      det.feed(l, dt);
+    }
+    for (let f = 0; f < 30; f++) det.feed(desprolijo(make, f), dt).forEach((m) => hits.add(m.id));
+    out.moverse_y_luego_posar[id] = [...hits];
+    if (!hits.has(id)) out.no_detectados.push(`tras-moverse:${id}`);
   }
 
   // --- mismos gestos en encuadre selfie (sin piernas) ---
