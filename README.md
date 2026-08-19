@@ -15,6 +15,33 @@ App web que mide tu "aura" en tiempo real con la cámara y te devuelve un clip l
 3. **Presentación** — el HUD se dibuja en canvas, no en DOM, porque `canvas.captureStream()` solo graba el canvas. Si fuera HTML el clip descargado saldría sin números.
 4. **Clip** — MediaRecorder graba el canvas. Negocia el códec (Safari no soporta webm) y comparte con Web Share API, con descarga como respaldo.
 
+## Movimientos con nombre
+
+`src/moves.js` detecta 11 movimientos por reglas de ángulos — sin dataset, sin entrenamiento. Cada uno da bonus de aura y su propio callout dorado.
+
+| move | cómo se detecta | bonus |
+|---|---|---|
+| `6-7` | manos al pecho, codos doblados, alternando arriba/abajo (3 cruces en 2s) | 9,000 |
+| `DAP` | dos personas, muñecas levantadas y juntas (< 0.42 torsos) | 12,000 |
+| `SCUBA` | ambas muñecas cerca de la cara, por encima de los hombros | 7,000 |
+| `DAB` | una muñeca junto a la nariz + otro brazo estirado en diagonal | 6,000 |
+| `PATADA ALTA` | un tobillo por encima de la cadera | 6,500 |
+| `GIRO COMPLETO` | el ancho de hombros colapsa (perfil) y vuelve en < 1.4s | 5,500 |
+| `T-POSE` | codos > 152°, muñecas a la altura del hombro y bien afuera | 5,000 |
+| `BAJANDO` | cadera a la altura de las rodillas, ambas parejas | 4,000 |
+| `MANOS ARRIBA` | ambas muñecas bien por encima de los hombros | 3,500 |
+| `PLEGARIA` | muñecas juntas al pecho, codos doblados | 3,000 |
+| `BRAZOS CRUZADOS` | muñecas cruzadas respecto a los hombros | 3,000 |
+
+Para agregar uno nuevo: metelo en `MOVES` con un `test(ctx)`. El contexto ya trae posiciones normalizadas por torso (`c.lWr`, `c.rWr`, `c.hip`…), ángulos de codo y distancias a la nariz. Los que dependen del tiempo (como `6-7` y `giro`) se marcan `temporal: true` y llevan su lógica dentro de `MoveDetector.feed`.
+
+Verificar que un detector nuevo funcione y no dispare de más:
+
+```js
+const m = await import('/src/movetest.js')
+m.run()   // debe dar no_detectados: [] y falsos_positivos: []
+```
+
 ## Principio de diseño
 
 > **Precisión = entrada. Diversión = salida.**
