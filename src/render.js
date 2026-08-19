@@ -28,7 +28,30 @@ export class Renderer {
     this.bursts = [];     // criticos
     this.line = { text: '', life: 0, color: BONE };
     this.t = 0;
+    this.disp = [0, 0];   // aura mostrada (persigue a la real)
     this.grain = this.makeGrain();
+    this.grainPat = this.x.createPattern(this.grain, 'repeat');   // crear el patron por frame costaba caro
+    this.tone = this.makeTone();
+    this.tonePat = this.x.createPattern(this.tone, 'repeat');
+    // angulos fijos: Math.random() por linea por frame generaba basura para el GC
+    this.rays = Array.from({ length: 34 }, (_, i) => ({
+      a: (i / 34) * Math.PI * 2,
+      inner: 0.45 + ((i * 37) % 100) / 100 * 0.28,
+      w: 0.6 + ((i * 53) % 100) / 100 * 2.2,
+    }));
+  }
+
+  /** Trama de puntos pre-renderizada. Antes eran ~3000 arc() por frame. */
+  makeTone() {
+    const s = 16;
+    const g = document.createElement('canvas');
+    g.width = g.height = s;
+    const gx = g.getContext('2d');
+    gx.fillStyle = BONE;
+    for (const [cx, cy] of [[s * 0.25, s * 0.25], [s * 0.75, s * 0.75]]) {
+      gx.beginPath(); gx.arc(cx, cy, s * 0.16, 0, 7); gx.fill();
+    }
+    return g;
   }
 
   makeGrain() {
@@ -65,6 +88,15 @@ export class Renderer {
     this.shake = Math.max(this.shake, 0.55);
   }
 
+  /** Move con nombre reconocido: el momento mas fuerte que puede pasar. */
+  addSignature(name, bonus) {
+    this.callouts.length = 0;
+    this.callouts.push({ text: name, sub: `+${bonus.toLocaleString('es-GT')} AURA`, color: GOLD, life: 2.4, max: 2.4, hero: true });
+    this.shake = 1;
+    this.flash = 0.85;
+    this.flashColor = GOLD;
+  }
+
   addCrit(text, mult, color) {
     this.bursts.length = 0;   // el critico es momento heroe: nunca dos encimados
     this.bursts.push({ text, mult, color, life: 1.5, max: 1.5 });
@@ -93,39 +125,32 @@ export class Renderer {
   }
 
   drawScreentone(intensity) {
-    if (intensity <= 0.02) return;
-    const { x, c, u } = this;
-    const step = u * 2.4;
+    if (intensity <= 0.04) return;
+    const { x, c } = this;
     x.save();
-    x.globalAlpha = 0.10 * intensity;
-    x.fillStyle = BONE;
-    for (let gy = 0; gy < c.height; gy += step) {
-      for (let gx = (gy / step % 2) * step / 2; gx < c.width; gx += step) {
-        const d = Math.hypot(gx - c.width / 2, gy - c.height / 2) / (c.width * 0.7);
-        const r = clamp(d * intensity * u * 0.5, 0, u * 0.42);
-        if (r > 0.3) { x.beginPath(); x.arc(gx, gy, r, 0, 7); x.fill(); }
-      }
-    }
+    x.globalAlpha = 0.11 * intensity;
+    x.fillStyle = this.tonePat;
+    x.fillRect(0, 0, c.width, c.height);
     x.restore();
   }
 
   drawSpeedLines(intensity) {
-    if (intensity <= 0.02) return;
+    if (intensity <= 0.04) return;
     const { x, c } = this;
     const cx = c.width / 2, cy = c.height / 2;
     const R = Math.hypot(cx, cy);
     x.save();
     x.globalAlpha = 0.5 * intensity;
     x.strokeStyle = BONE;
-    for (let i = 0; i < 46; i++) {
-      const a = (i / 46) * Math.PI * 2 + this.t * 0.15;
-      const inner = R * (0.42 + Math.random() * 0.3);
-      x.lineWidth = Math.random() * 3 + 0.6;
-      x.beginPath();
-      x.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
-      x.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
-      x.stroke();
+    x.beginPath();                      // un solo path para todos los rayos
+    for (const r of this.rays) {
+      const a = r.a + this.t * 0.15;
+      const co = Math.cos(a), si = Math.sin(a);
+      x.moveTo(cx + co * R * r.inner, cy + si * R * r.inner);
+      x.lineTo(cx + co * R, cy + si * R);
     }
+    x.lineWidth = 1.6;
+    x.stroke();
     x.restore();
   }
 
@@ -137,21 +162,32 @@ export class Renderer {
 
     x.save();
     x.lineCap = 'round';
-    x.shadowColor = color;
-    x.shadowBlur = u * (1.2 + glow * 5);
     x.strokeStyle = color;
-    x.lineWidth = u * (0.45 + glow * 0.5);
+
+    // shadowBlur mataba el framerate en movil. Dos trazos (uno ancho translucido,
+    // uno fino solido) dan el mismo glow por una fraccion del costo.
+    const path = new Path2D();
     for (const [a, b] of CONNECTIONS) {
       if ((lm[a].visibility ?? 1) < 0.45 || (lm[b].visibility ?? 1) < 0.45) continue;
       const [x1, y1] = px(lm[a]), [x2, y2] = px(lm[b]);
-      x.beginPath(); x.moveTo(x1, y1); x.lineTo(x2, y2); x.stroke();
+      path.moveTo(x1, y1); path.lineTo(x2, y2);
     }
+    x.globalAlpha = 0.18 + glow * 0.22;
+    x.lineWidth = u * (1.6 + glow * 2.6);
+    x.stroke(path);
+    x.globalAlpha = 1;
+    x.lineWidth = u * (0.45 + glow * 0.5);
+    x.stroke(path);
+
     x.fillStyle = BONE;
+    const dots = new Path2D();
     for (const i of [0, 15, 16, 27, 28]) {
       if ((lm[i].visibility ?? 1) < 0.45) continue;
       const [cx2, cy2] = px(lm[i]);
-      x.beginPath(); x.arc(cx2, cy2, u * (0.5 + glow * 0.7), 0, 7); x.fill();
+      dots.moveTo(cx2 + u * (0.5 + glow * 0.7), cy2);
+      dots.arc(cx2, cy2, u * (0.5 + glow * 0.7), 0, 7);
     }
+    x.fill(dots);
     x.restore();
   }
 
@@ -180,10 +216,11 @@ export class Renderer {
     x.font = `700 ${u * 2.1}px "Chakra Petch", sans-serif`;
     x.fillText(`JUGADOR ${slot + 1}`, tx, y + u * 3.1);
 
-    // numero de aura
+    // el contador sube suave hacia el valor real: saltar de golpe se ve trabado
+    this.disp[slot] += (p.aura - this.disp[slot]) * 0.22;
     x.fillStyle = BONE;
     x.font = `${u * 6.4}px "Archivo Black", sans-serif`;
-    x.fillText(Math.round(p.aura).toLocaleString('es-GT'), tx, y + u * 8.6);
+    x.fillText(Math.round(this.disp[slot]).toLocaleString('es-GT'), tx, y + u * 8.6);
 
     // barra de energia
     const barW = w - u * 4.8, barY = y + u * 9.4;
@@ -230,13 +267,16 @@ export class Renderer {
 
       // el ancho util encoge por la italica falsa y por el skew de la caja
       const maxW = c.width * 0.84 / scale;
-      const fs = this.fitFont(k.text, maxW, u * 5.6, '"Archivo Black", sans-serif');
+      const fs = this.fitFont(k.text, maxW, u * (k.hero ? 7.4 : 5.6), '"Archivo Black", sans-serif');
       const tw = x.measureText(k.text).width;
-      x.fillStyle = INK;
+      // el move reconocido invierte los colores: fondo dorado, letra tinta
+      x.fillStyle = k.hero ? k.color : INK;
       x.fillRect(-tw / 2 - u * 2, -fs * 0.79, tw + u * 4, fs * 1.14);
-      x.fillStyle = k.color;
-      x.fillRect(-tw / 2 - u * 2, fs * 0.29, tw + u * 4, u * 0.5);
-      x.fillStyle = BONE;
+      if (!k.hero) {
+        x.fillStyle = k.color;
+        x.fillRect(-tw / 2 - u * 2, fs * 0.29, tw + u * 4, u * 0.5);
+      }
+      x.fillStyle = k.hero ? INK : BONE;
       x.fillText(k.text, 0, 0);
       if (k.sub) {
         x.font = `700 ${u * 2.4}px "Chakra Petch", sans-serif`;
@@ -340,9 +380,8 @@ export class Renderer {
 
     players.forEach((p, i) => this.drawSkeleton(p.lm, P_COLOR[i], p.energy, mirror));
 
-    // grano
-    const pat = x.createPattern(this.grain, 'repeat');
-    x.save(); x.globalAlpha = 0.5; x.fillStyle = pat;
+    // grano (patron cacheado)
+    x.save(); x.globalAlpha = 0.5; x.fillStyle = this.grainPat;
     x.translate((this.t * 60) % 140 - 140, (this.t * 37) % 140 - 140);
     x.fillRect(0, 0, c.width + 140, c.height + 140); x.restore();
 

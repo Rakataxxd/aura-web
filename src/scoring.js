@@ -2,11 +2,10 @@
 // Falsa precision en el texto = ok. Falsa reactividad = jamas.
 
 import { moveName, pick, ROAST_HYPE, ROAST_LOW, ROAST_HOLD, CRIT_LINES } from './roasts.js';
+import { MoveDetector } from './moves.js';
+import { NOSE, L_SH, R_SH, L_EL, R_EL, L_WR, R_WR, L_HIP, R_HIP, L_KN, R_KN, L_AN, R_AN } from './landmarks.js';
 
-// MediaPipe Pose (33 pts)
-export const NOSE = 0, L_SH = 11, R_SH = 12, L_EL = 13, R_EL = 14,
-  L_WR = 15, R_WR = 16, L_HIP = 23, R_HIP = 24,
-  L_KN = 25, R_KN = 26, L_AN = 27, R_AN = 28;
+export * from './landmarks.js';
 
 // lo que la gente mueve para lucirse
 const TRACKED = [NOSE, L_EL, R_EL, L_WR, R_WR, L_KN, R_KN, L_AN, R_AN];
@@ -34,6 +33,8 @@ export class Player {
     this.moveCooldown = 0;
     this.events = [];
     this.lost = 0;
+    this.moves = new MoveDetector();
+    this.landed = [];      // moves con nombre acertados en la ronda
   }
 
   emit(kind, text, value = 0) {
@@ -49,9 +50,19 @@ export class Player {
       this.lost += dt;
       this.energy += (0 - this.energy) * 0.12;
       this.prev = null;
+      this.moves.feed(null, dt);
       return this;
     }
     this.lost = 0;
+
+    // --- moves con nombre (Nivel 2): bonus fuerte + callout dorado ---
+    for (const m of this.moves.feed(lm, dt)) {
+      this.aura += m.bonus;
+      this.landed.push(m.name);
+      this.emit('signature', m.name, m.bonus);
+      this.moveCooldown = 2.5;   // que un nombre inventado no le pise el momento
+      if (m.line) { this.lineCooldown = 2.6; this.emit('line', m.line); }
+    }
 
     const shoulder = mid(lm[L_SH], lm[R_SH]);
     const hip = mid(lm[L_HIP], lm[R_HIP]);

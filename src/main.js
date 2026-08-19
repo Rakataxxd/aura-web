@@ -3,9 +3,12 @@ import { createPose, openCamera, assignSlots, prefetchAssets } from './pose.js';
 import { Player } from './scoring.js';
 import { Renderer, P_COLOR, GOLD, BONE } from './render.js';
 import { Recorder, shareOrDownload } from './record.js';
+import { detectDap, DAP } from './moves.js';
 import { verdictFor } from './roasts.js';
 
 const ROUND_SECONDS = 15;
+const DEBUG = new URLSearchParams(location.search).has('debug');
+const fpsHist = [];
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -41,8 +44,26 @@ let players = [new Player(0), new Player(1)];
 let activeCount = 1;
 let state = 'idle';
 let raf = 0, lastVideoTime = -1, lastT = 0, roundLeft = ROUND_SECONDS, blob = null;
-let prefetch = null, prefetchPct = 0;
+let prefetch = null, prefetchPct = 0, dapCool = 0;
 const mirror = true;   // camara frontal: espejo, si no se siente al reves
+
+// Suavizado exponencial de landmarks solo para el render.
+const smoothed = [null, null];
+function smoothLm(slot, target, dt) {
+  if (!target) { smoothed[slot] = null; return null; }
+  const prev = smoothed[slot];
+  if (!prev || prev.length !== target.length) {
+    smoothed[slot] = target.map((p) => ({ ...p }));
+    return smoothed[slot];
+  }
+  const a = 1 - Math.exp(-dt * 22);   // independiente del framerate
+  for (let i = 0; i < target.length; i++) {
+    prev[i].x += (target[i].x - prev[i].x) * a;
+    prev[i].y += (target[i].y - prev[i].y) * a;
+    prev[i].visibility = target[i].visibility;
+  }
+  return prev;
+}
 
 function fail(msg) {
   state = 'idle';
@@ -107,7 +128,8 @@ function countdown() {
 
 function handleEvents(p, slot) {
   for (const ev of p.drain()) {
-    if (ev.kind === 'move') renderer.addCallout(ev.text, P_COLOR[slot], `+${ev.value} AURA`);
+    if (ev.kind === 'signature') renderer.addSignature(ev.text, ev.value);
+    else if (ev.kind === 'move') renderer.addCallout(ev.text, P_COLOR[slot], `+${ev.value} AURA`);
     else if (ev.kind === 'crit') renderer.addCrit(ev.text, ev.value, GOLD);
     else if (ev.kind === 'line') renderer.setLine(ev.text, P_COLOR[slot]);
     else if (ev.kind === 'combo' && ev.value % 5 === 0) {
@@ -138,8 +160,22 @@ function loop() {
   const scoring = state === 'running';
   players.forEach((p, i) => {
     if (scoring) p.update(found[i], t);
-    p.lm = found[i];
+    // El scorer usa los landmarks crudos (la energia debe ser real).
+    // El dibujo usa una version suavizada: la deteccion llega a ~30Hz y
+    // pintarla tal cual a 60Hz se ve a saltos.
+    p.lm = smoothLm(i, found[i], dt);
   });
+  // DAP: no es de un jugador, es del par. Se evalua sobre landmarks crudos.
+  if (scoring && activeCount === 2) {
+    dapCool -= dt;
+    if (dapCool <= 0 && detectDap(found[0], found[1])) {
+      dapCool = DAP.cd;
+      players.forEach((p) => { p.aura += DAP.bonus; p.landed.push(DAP.name); });
+      renderer.addSignature(DAP.name, DAP.bonus);
+      renderer.setLine(DAP.line, GOLD);
+    }
+  }
+
   if (scoring) players.forEach((p, i) => { if (i < activeCount) handleEvents(p, i); });
 
   if (scoring) {
@@ -147,9 +183,16 @@ function loop() {
     if (roundLeft <= 0) { finish(); return; }
   }
 
-  const status = state === 'running'
+  // ?debug muestra FPS reales. Fuera del clip por defecto.
+  if (DEBUG) {
+    fpsHist.push(1 / Math.max(dt, 1e-4));
+    if (fpsHist.length > 45) fpsHist.shift();
+  }
+  const fpsTag = DEBUG ? `  ·  ${(fpsHist.reduce((a, b) => a + b, 0) / fpsHist.length).toFixed(0)} FPS` : '';
+
+  const status = (state === 'running'
     ? `${roundLeft.toFixed(1)}s  ·  ${activeCount === 2 ? 'MODO VERSUS' : 'SUJETO ÚNICO'}`
-    : (found[0] ? 'SUJETO DETECTADO' : 'BUSCANDO SUJETO…');
+    : (found[0] ? 'SUJETO DETECTADO' : 'BUSCANDO SUJETO…')) + fpsTag;
 
   renderer.frame({ video: el.video, mirror, players, active: activeCount, status, dt });
 }
@@ -171,11 +214,16 @@ async function finish() {
   el.rScore.textContent = aura.toLocaleString('es-GT');
   el.rTitle.textContent = v.t;
   el.rSub.textContent = v.s;
+  const landed = [...new Set(p.landed)];
   el.rStats.innerHTML = [
     `PICO <b>${p.peakEnergy.toFixed(1)}</b>`,
     `COMBO MÁX <b>${p.combo}</b>`,
     activeCount === 2 ? `GANADOR <b>P${winner + 1}</b>` : `MODO <b>SOLO</b>`,
+    ...landed.map((n) => `<b>${n}</b>`),
   ].map((s) => `<span>${s}</span>`).join('');
+  el.rSub.textContent = landed.length
+    ? `${v.s}  Reconocí: ${landed.join(', ')}.`
+    : `${v.s} No detecté ningún movimiento con nombre.`;
 
   if (blob) {
     el.share.classList.remove('hidden');

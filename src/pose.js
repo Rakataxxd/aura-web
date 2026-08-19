@@ -57,15 +57,22 @@ export async function createPose(numPoses = 2) {
 }
 
 export async function openCamera(video, facing = 'user') {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      facingMode: { ideal: facing },
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      frameRate: { ideal: 30 },
-    },
-    audio: false,
-  });
+  const ideal = {
+    facingMode: { ideal: facing },
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    // solo 'ideal': 'min' es restriccion dura y una camara que no la
+    // cumpla tira error en vez de negociar. Nunca uses min aca.
+    frameRate: { ideal: 60 },
+  };
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: ideal, audio: false });
+  } catch (e) {
+    if (e?.name === 'NotAllowedError') throw e;
+    // ultimo recurso: pedir cualquier camara sin condiciones
+    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  }
   video.srcObject = stream;
   video.setAttribute('playsinline', '');  // iOS: sin esto abre en pantalla completa nativa
   video.muted = true;
