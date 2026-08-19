@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0a0a0c" />
+<title>ESCÁNER DE AURA</title>
+<meta name="description" content="Poné la cámara. Movete. El escáner mide tu aura en tiempo real y te da un clip para postear." />
+<meta property="og:title" content="ESCÁNER DE AURA" />
+<meta property="og:description" content="¿Cuánta aura tenés? Averigualo en 15 segundos." />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Chakra+Petch:wght@600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="stage">
+    <video id="cam" playsinline muted></video>
+    <canvas id="view"></canvas>
+
+    <!-- INTRO -->
+    <section class="panel" id="intro">
+      <div class="tape">SISTEMA DE MEDICIÓN NO CERTIFICADO</div>
+      <h1>ESCÁNER<br /><em>DE AURA</em></h1>
+      <p class="lede">Poné la cámara. Movete 15 segundos.<br />El escáner hace el resto.</p>
+      <button class="btn" id="go">ESCANEAR MI AURA</button>
+      <p class="fine" id="note">Tu video nunca sale de tu teléfono. Todo corre acá.</p>
+    </section>
+
+    <!-- CARGANDO -->
+    <section class="panel hidden" id="loading">
+      <div class="spinner"></div>
+      <p class="lede" id="loadmsg">CALIBRANDO SENSORES…</p>
+      <p class="fine">primera vez tarda unos segundos</p>
+    </section>
+
+    <!-- CUENTA REGRESIVA -->
+    <section class="panel bare hidden" id="count"><span id="countnum">3</span></section>
+
+    <!-- RESULTADO -->
+    <section class="panel hidden" id="result">
+      <div class="tape" id="rTape">VEREDICTO</div>
+      <div class="score" id="rScore">0</div>
+      <h2 id="rTitle">—</h2>
+      <p class="lede" id="rSub">—</p>
+      <div class="stats" id="rStats"></div>
+      <button class="btn" id="share">DESCARGAR CLIP</button>
+      <button class="btn ghost" id="again">OTRA VEZ</button>
+      <p class="fine" id="rNote"></p>
+    </section>
+
+    <!-- ERROR -->
+    <section class="panel hidden" id="oops">
+      <div class="tape alert">ERROR</div>
+      <p class="lede" id="oopsmsg">Algo falló.</p>
+      <button class="btn ghost" id="retry">REINTENTAR</button>
+    </section>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
