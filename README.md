@@ -21,17 +21,23 @@ App web que mide tu "aura" en tiempo real con la cámara y te devuelve un clip l
 
 | move | cómo se detecta | bonus |
 |---|---|---|
-| `6-7` | manos al pecho, codos doblados, alternando arriba/abajo (3 cruces en 2s) | 9,000 |
-| `DAP` | dos personas, muñecas levantadas y juntas (< 0.42 torsos) | 12,000 |
-| `SCUBA` | ambas muñecas cerca de la cara, por encima de los hombros | 7,000 |
-| `DAB` | una muñeca junto a la nariz + otro brazo estirado en diagonal | 6,000 |
-| `PATADA ALTA` | un tobillo por encima de la cadera | 6,500 |
-| `GIRO COMPLETO` | el ancho de hombros colapsa (perfil) y vuelve en < 1.4s | 5,500 |
-| `T-POSE` | codos > 152°, muñecas a la altura del hombro y bien afuera | 5,000 |
-| `BAJANDO` | cadera a la altura de las rodillas, ambas parejas | 4,000 |
-| `MANOS ARRIBA` | ambas muñecas bien por encima de los hombros | 3,500 |
-| `PLEGARIA` | muñecas juntas al pecho, codos doblados | 3,000 |
-| `BRAZOS CRUZADOS` | muñecas cruzadas respecto a los hombros | 3,000 |
+| `DAP` | dos personas, muñecas **levantadas** y juntas (< 0.42 torsos) | 22,000 |
+| `6-7` | manos al pecho, codos doblados, alternando arriba/abajo (3 cruces en 2s) | 18,000 |
+| `SCUBA` | **ambas** muñecas enmarcando la cara, a la altura de los ojos o arriba | 15,000 |
+| `MEWING` | **una** muñeca en la mandíbula (debajo de la nariz) y la otra lejos | 14,000 |
+| `GIRO COMPLETO` | el ancho de hombros colapsa (perfil) y vuelve en < 1.4s | 12,000 |
+| `T-POSE` | codos > 152°, muñecas a la altura del hombro y bien afuera | 11,000 |
+| `BAJANDO` | cadera a la altura de las rodillas, ambas parejas | 9,000 |
+| `MANOS ARRIBA` | ambas muñecas bien por encima de los hombros | 8,000 |
+| `PLEGARIA` | muñecas juntas al pecho, codos doblados | 7,000 |
+
+Los bonus pesan a propósito: si el aura por moverse mucho aplastara a los moves, sacudirse le ganaría a hacer el movimiento — lo contrario de lo que el juego premia.
+
+### Las dos reglas que costaron bugs reales
+
+**1. Filtrar por `visibility`.** MediaPipe devuelve coordenadas para landmarks fuera de cuadro — inventadas, con `visibility` baja. En encuadre selfie eso produce tobillos fantasma flotando sobre la cadera, y un move de piernas dispara sin parar. Cada move declara sus landmarks en `needs`.
+
+**2. El torso no siempre sirve de escala.** Si las caderas están al borde o fuera del cuadro, la medida hombro→cadera se corrompe y con ella todos los umbrales. Los gestos de cara se miden contra `F` (nariz→centro de hombros), que sobrevive cualquier encuadre donde se te vea la cara. `movetest.js` cubre este caso explícitamente.
 
 Para agregar uno nuevo: metelo en `MOVES` con un `test(ctx)`. El contexto ya trae posiciones normalizadas por torso (`c.lWr`, `c.rWr`, `c.hip`…), ángulos de codo y distancias a la nariz. Los que dependen del tiempo (como `6-7` y `giro`) se marcan `temporal: true` y llevan su lógica dentro de `MoveDetector.feed`.
 
@@ -52,13 +58,18 @@ Los números del comentario son absurdos a propósito ("detecté 3 microexpresio
 
 `src/roasts.js` es el archivo que más vale la pena tocar. Nombres de movimientos, frases del narrador, veredictos. Editar ahí cambia el producto más que tocar el código.
 
-Calibración actual para una ronda de 15s:
+Calibración actual para una ronda de 15s, **sin contar moves con nombre**:
 
 | perfil | aura | veredicto |
 |---|---|---|
-| tímido | ~2,000 | SIN AURA DETECTABLE |
-| normal | ~25,000 | AURA RESPETABLE |
-| salvaje | ~52,000 | NIVEL LEYENDA |
+| quieto | **0** | SIN AURA DETECTABLE |
+| suave | ~160 | SIN AURA DETECTABLE |
+| normal | ~42,000 | AURA RESPETABLE |
+| salvaje | ~73,000 | AURA PELIGROSA |
+
+Debajo de `IDLE` (0.45 torsos/segundo) el aura **drena** en vez de subir — pero de forma proporcional a lo quieto que estés, no de golpe. Un drenaje plano creaba un acantilado donde moverse suave valía lo mismo que no moverse.
+
+Los tiers altos (LEYENDA 80k, PROHIBIDA 130k) exigen combinar movimiento **y** moves con nombre. Ninguno de los dos solo alcanza.
 
 ## Desarrollo
 
@@ -84,6 +95,19 @@ npm run deploy
 ```
 
 Compila y publica la rama `gh-pages`.
+
+## Rendimiento
+
+El render corre a 60fps y el clip se graba a 60fps (`captureStream(60)` — con 30 el clip salía capado aunque el canvas dibujara a 60).
+
+Trampas ya pagadas, no las reintroduzcas:
+
+- `shadowBlur` hunde el framerate en móvil. El glow del esqueleto son dos trazos (uno ancho translúcido, uno fino sólido).
+- La trama de puntos dibujaba ~3,000 `arc()` por frame. Ahora es un patrón pre-renderizado: una llamada.
+- El grano se dibuja cada 2 frames. A 60fps no se nota y libera medio presupuesto de píxeles.
+- La cuenta regresiva dibuja los efectos **a tope a propósito** (`stress: true`): mide el costo real antes de grabar. Si no llega a 48fps, baja el canvas a 540×960 **antes** de arrancar — cambiar la resolución a mitad de grabación rompe el encoder.
+
+`?debug` en la URL muestra FPS y resolución en vivo, fuera del clip.
 
 ## Peso
 

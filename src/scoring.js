@@ -10,6 +10,11 @@ export * from './landmarks.js';
 // lo que la gente mueve para lucirse
 const TRACKED = [NOSE, L_EL, R_EL, L_WR, R_WR, L_KN, R_KN, L_AN, R_AN];
 
+// Debajo de IDLE (torsos/segundo) no cuenta como movimiento: es respirar,
+// acomodarse y el ruido propio del modelo. Ahi el aura drena en vez de subir.
+const IDLE = 0.45;
+const DRAIN = 700;   // aura por segundo quieto
+
 const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -33,6 +38,7 @@ export class Player {
     this.moveCooldown = 0;
     this.events = [];
     this.lost = 0;
+    this.draining = false;
     this.moves = new MoveDetector();
     this.landed = [];      // moves con nombre acertados en la ronda
   }
@@ -100,10 +106,26 @@ export class Player {
 
     // --- aura acumulada ---
     const hot = this.energy > 1.6;
-    // escala calibrada para ronda de 15s: timido ~3k, normal ~25k, salvaje ~70k.
-    // numeros grandes se sienten mejor y se postean mas.
-    const gain = (Math.pow(this.energy, 1.25) * 130 + this.amplitude * 200) * dt;
-    this.aura += gain * (1 + Math.min(this.combo, 12) * 0.08);
+
+    // Zona muerta: debajo de IDLE no estas haciendo nada y el aura DRENA.
+    // Antes la amplitud sumaba sola — pero amplitud mide que tan extendido
+    // esta el cuerpo, no cuanto se mueve: parado con los brazos abiertos
+    // acumulabas aura para siempre. Ahora la amplitud solo cuenta
+    // multiplicada por movimiento real.
+    const over = this.energy - IDLE;
+    let gain;
+    if (over <= 0) {
+      // proporcional a lo quieto que estas: 0 justo en el umbral, maximo
+      // congelado. Un drenaje plano creaba un acantilado y moverse suave
+      // valia lo mismo que no moverse.
+      gain = -DRAIN * (1 - this.energy / IDLE) * dt;
+      this.draining = this.aura > 0 && this.energy < IDLE * 0.6;
+    } else {
+      gain = (Math.pow(over, 1.25) * 75 + this.amplitude * over * 28) * dt
+        * (1 + Math.min(this.combo, 12) * 0.08);
+      this.draining = false;
+    }
+    this.aura = Math.max(0, this.aura + gain);
 
     // --- combo ---
     if (hot) {

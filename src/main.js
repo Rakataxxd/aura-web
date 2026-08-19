@@ -26,14 +26,23 @@ const show = (...ids) => {
 };
 
 // ---------- canvas ----------
-function sizeCanvas() {
-  const portrait = window.innerHeight >= window.innerWidth;
-  const [W, H] = portrait ? [720, 1280] : [1280, 720];
-  el.canvas.width = W;
-  el.canvas.height = H;
+let downscaled = false;
+let stressFps = [];
+
+function fitCanvasCss() {
+  const { width: W, height: H } = el.canvas;
   const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
   el.canvas.style.width = `${W * scale}px`;
   el.canvas.style.height = `${H * scale}px`;
+}
+
+function sizeCanvas() {
+  const portrait = window.innerHeight >= window.innerWidth;
+  let [W, H] = portrait ? [720, 1280] : [1280, 720];
+  if (downscaled) { W = Math.round(W * 0.75); H = Math.round(H * 0.75); }
+  el.canvas.width = W;
+  el.canvas.height = H;
+  fitCanvasCss();
 }
 sizeCanvas();
 addEventListener('resize', () => { if (state !== 'running') sizeCanvas(); });
@@ -103,6 +112,7 @@ async function boot() {
 function countdown() {
   players = [new Player(0), new Player(1)];
   roundLeft = ROUND_SECONDS;
+  stressFps = [];
   state = 'countdown';
   lastT = performance.now() / 1000;
   loop();
@@ -115,8 +125,21 @@ function countdown() {
     if (n === 0) {
       clearInterval(tick);
       show();
+      // Si el aparato no aguanto la prueba de esfuerzo de la cuenta regresiva,
+      // bajamos resolucion ANTES de grabar. Cambiarla a mitad de grabacion
+      // rompe el encoder, por eso la decision se toma aca.
+      if (!downscaled && stressFps.length > 20) {
+        const avg = stressFps.reduce((a, b) => a + b, 0) / stressFps.length;
+        if (avg < 48) {
+          downscaled = true;
+          el.canvas.width = 540; el.canvas.height = 960;
+          fitCanvasCss();
+          renderer = new Renderer(el.canvas);
+          console.info(`[perf] ${avg.toFixed(0)} FPS en la prueba -> bajo a 540x960`);
+        }
+      }
       state = 'running';
-      recorder.start(30);
+      recorder.start(60);
       return;
     }
     el.countnum.textContent = n;
@@ -183,18 +206,28 @@ function loop() {
     if (roundLeft <= 0) { finish(); return; }
   }
 
-  // ?debug muestra FPS reales. Fuera del clip por defecto.
+  const fps = 1 / Math.max(dt, 1e-4);
+  // La cuenta regresiva dibuja los efectos a tope a proposito: mide el costo
+  // REAL antes de grabar. Medirlo con la pantalla en calma daba 60 siempre
+  // y luego se caia al empezar la ronda.
+  if (state === 'countdown' && stressFps.length < 90) stressFps.push(fps);
+
   if (DEBUG) {
-    fpsHist.push(1 / Math.max(dt, 1e-4));
+    fpsHist.push(fps);
     if (fpsHist.length > 45) fpsHist.shift();
   }
-  const fpsTag = DEBUG ? `  ·  ${(fpsHist.reduce((a, b) => a + b, 0) / fpsHist.length).toFixed(0)} FPS` : '';
+  const fpsTag = DEBUG
+    ? `  ·  ${(fpsHist.reduce((a, b) => a + b, 0) / fpsHist.length).toFixed(0)} FPS  ${el.canvas.width}p`
+    : '';
 
   const status = (state === 'running'
     ? `${roundLeft.toFixed(1)}s  ·  ${activeCount === 2 ? 'MODO VERSUS' : 'SUJETO ÚNICO'}`
     : (found[0] ? 'SUJETO DETECTADO' : 'BUSCANDO SUJETO…')) + fpsTag;
 
-  renderer.frame({ video: el.video, mirror, players, active: activeCount, status, dt });
+  renderer.frame({
+    video: el.video, mirror, players, active: activeCount, status, dt,
+    stress: state === 'countdown',
+  });
 }
 
 async function finish() {

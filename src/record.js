@@ -26,11 +26,16 @@ export class Recorder {
     this.supported = this.mime !== null;
   }
 
-  start(fps = 30) {
+  // 60 por defecto: captureStream(30) capaba el clip a 30fps aunque el
+  // canvas estuviera dibujando a 60.
+  start(fps = 60) {
     if (!this.supported) return false;
     this.chunks = [];
     const stream = this.canvas.captureStream(fps);
-    const opts = { videoBitsPerSecond: 6_000_000 };
+    // Medido: Chrome entrega ~2.4x el bitrate pedido con esta cantidad de
+    // movimiento. 3.5M -> ~8Mbps reales -> ~14MB por clip de 15s a 60fps,
+    // que todavia se comparte bien con datos moviles.
+    const opts = { videoBitsPerSecond: 3_500_000 };
     if (this.mime) opts.mimeType = this.mime;
     try {
       this.rec = new MediaRecorder(stream, opts);

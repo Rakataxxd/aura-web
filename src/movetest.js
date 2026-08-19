@@ -17,16 +17,33 @@ function base() {
   return lm;
 }
 
+/** Encuadre selfie: piernas fuera de cuadro -> MediaPipe las inventa con
+ *  visibility baja. Este es el caso que hacia disparar moves de piernas
+ *  sin parar y corrompia la escala de torso. */
+function selfie(make = base) {
+  const l = make();
+  for (const i of [25, 26, 27, 28, 29, 30, 31, 32]) l[i] = P(0.5 + (i % 2 ? 0.05 : -0.05), 0.35, 0.12);
+  l[23] = P(0.45, 0.58, 0.45); l[24] = P(0.55, 0.58, 0.45);   // caderas al borde
+  return l;
+}
+
 const POSES = {
   't-pose': () => { const l = base(); l[13] = P(0.28, 0.30); l[14] = P(0.72, 0.30); l[15] = P(0.13, 0.30); l[16] = P(0.87, 0.30); return l; },
   'manos-arriba': () => { const l = base(); l[13] = P(0.42, 0.20); l[14] = P(0.58, 0.20); l[15] = P(0.44, 0.05); l[16] = P(0.56, 0.05); return l; },
   'scuba': () => { const l = base(); l[13] = P(0.34, 0.30); l[14] = P(0.66, 0.30); l[15] = P(0.44, 0.19); l[16] = P(0.56, 0.19); return l; },
-  'dab': () => { const l = base(); l[13] = P(0.44, 0.26); l[15] = P(0.52, 0.20); l[14] = P(0.72, 0.20); l[16] = P(0.86, 0.11); return l; },
+  'mewing': () => { const l = base(); l[14] = P(0.64, 0.32); l[16] = P(0.56, 0.24); return l; },
   'rezo': () => { const l = base(); l[13] = P(0.38, 0.40); l[14] = P(0.62, 0.40); l[15] = P(0.49, 0.40); l[16] = P(0.51, 0.40); return l; },
-  'cruzado': () => { const l = base(); l[13] = P(0.36, 0.40); l[14] = P(0.64, 0.40); l[15] = P(0.58, 0.42); l[16] = P(0.42, 0.42); return l; },
-  'patada': () => { const l = base(); l[27] = P(0.42, 0.34); l[25] = P(0.44, 0.50); return l; },
   'sentadilla': () => { const l = base(); l[23] = P(0.45, 0.70); l[24] = P(0.55, 0.70); l[25] = P(0.44, 0.74); l[26] = P(0.56, 0.74); return l; },
   'neutral': base,
+};
+
+// Los mismos gestos pero en encuadre selfie: deben seguir detectandose,
+// porque su escala de referencia es la cara, no el torso.
+const POSES_SELFIE = {
+  'scuba': () => selfie(POSES['scuba']),
+  'mewing': () => selfie(POSES['mewing']),
+  't-pose': () => selfie(POSES['t-pose']),
+  'manos-arriba': () => selfie(POSES['manos-arriba']),
 };
 
 /** 6-7: manos al pecho alternando arriba y abajo. */
@@ -63,6 +80,23 @@ export function run() {
       out.detectados[id] = [...hits];
       if (!hits.has(id)) out.no_detectados.push(id);
     }
+  }
+
+  // --- mismos gestos en encuadre selfie (sin piernas) ---
+  out.selfie = {};
+  for (const [id, make] of Object.entries(POSES_SELFIE)) {
+    const det = new MoveDetector();
+    const hits = new Set();
+    for (let f = 0; f < 30; f++) det.feed(make(), dt).forEach((m) => hits.add(m.id));
+    out.selfie[id] = [...hits];
+    if (!hits.has(id)) out.no_detectados.push(`selfie:${id}`);
+  }
+  // selfie quieto: no debe disparar NADA (aca salia 'patada' sin parar)
+  {
+    const det = new MoveDetector();
+    const hits = new Set();
+    for (let f = 0; f < 60; f++) det.feed(selfie(), dt).forEach((m) => hits.add(m.id));
+    out.selfie_quieto_falsos = [...hits];
   }
 
   // --- 6-7 (temporal) ---

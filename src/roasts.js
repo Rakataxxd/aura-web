@@ -61,11 +61,11 @@ export const CRIT_LINES = [
 // LEYENDA se alcanza esforzandose. PROHIBIDA es raro -> por eso se clipea.
 export const VERDICTS = [
   { min: 0, t: 'SIN AURA DETECTABLE', s: 'Consultá a un especialista.' },
-  { min: 3000, t: 'AURA DE PRINCIPIANTE', s: 'Hay algo. Muy poco, pero hay.' },
-  { min: 12000, t: 'AURA RESPETABLE', s: 'Ya podés entrar a una fiesta sin permiso.' },
-  { min: 28000, t: 'AURA PELIGROSA', s: 'La gente se voltea a ver y no sabe por qué.' },
-  { min: 50000, t: 'AURA NIVEL LEYENDA', s: 'Documentado por primera vez en esta cámara.' },
-  { min: 78000, t: 'AURA PROHIBIDA', s: 'No deberías tener acceso a esto.' },
+  { min: 5000, t: 'AURA DE PRINCIPIANTE', s: 'Hay algo. Muy poco, pero hay.' },
+  { min: 20000, t: 'AURA RESPETABLE', s: 'Ya podés entrar a una fiesta sin permiso.' },
+  { min: 45000, t: 'AURA PELIGROSA', s: 'La gente se voltea a ver y no sabe por qué.' },
+  { min: 80000, t: 'AURA NIVEL LEYENDA', s: 'Documentado por primera vez en esta cámara.' },
+  { min: 130000, t: 'AURA PROHIBIDA', s: 'No deberías tener acceso a esto.' },
 ];
 
 export function verdictFor(aura) {

@@ -34,10 +34,9 @@ export class Renderer {
     this.tone = this.makeTone();
     this.tonePat = this.x.createPattern(this.tone, 'repeat');
     // angulos fijos: Math.random() por linea por frame generaba basura para el GC
-    this.rays = Array.from({ length: 34 }, (_, i) => ({
-      a: (i / 34) * Math.PI * 2,
+    this.rays = Array.from({ length: 24 }, (_, i) => ({
+      a: (i / 24) * Math.PI * 2,
       inner: 0.45 + ((i * 37) % 100) / 100 * 0.28,
-      w: 0.6 + ((i * 53) % 100) / 100 * 2.2,
     }));
   }
 
@@ -218,9 +217,14 @@ export class Renderer {
 
     // el contador sube suave hacia el valor real: saltar de golpe se ve trabado
     this.disp[slot] += (p.aura - this.disp[slot]) * 0.22;
-    x.fillStyle = BONE;
+    // quieto = el aura drena, y se ve: el numero se pone magenta
+    x.fillStyle = p.draining ? P_COLOR[1] : BONE;
     x.font = `${u * 6.4}px "Archivo Black", sans-serif`;
     x.fillText(Math.round(this.disp[slot]).toLocaleString('es-GT'), tx, y + u * 8.6);
+    if (p.draining) {
+      x.font = `700 ${u * 1.9}px "Chakra Petch", sans-serif`;
+      x.fillText('PERDIENDO AURA', tx, y + u * 10.3);
+    }
 
     // barra de energia
     const barW = w - u * 4.8, barY = y + u * 9.4;
@@ -358,13 +362,17 @@ export class Renderer {
     x.restore();
   }
 
-  frame({ video, mirror, players, active, status, dt }) {
+  frame({ video, mirror, players, active, status, dt, stress = false }) {
     const { x, c } = this;
     this.t += dt;
+    this.frameNo = (this.frameNo || 0) + 1;
     this.shake = Math.max(0, this.shake - dt * 2.6);
     this.flash = Math.max(0, this.flash - dt * 3.4);
 
     const maxE = Math.max(...players.map((p) => p.energy), 0);
+    // stress: fuerza los efectos caros para medir el costo real antes de grabar
+    const toneI = stress ? 0.9 : clamp(maxE / 5, 0, 1);
+    const rayI = stress ? 0.7 : clamp((maxE - 3.6) / 4, 0, 1) * 0.8 + this.flash * 0.5;
 
     x.save();
     if (this.shake > 0.01) {
@@ -375,15 +383,18 @@ export class Renderer {
     x.fillStyle = INK;
     x.fillRect(-50, -50, c.width + 100, c.height + 100);
     this.drawVideo(video, mirror);
-    this.drawScreentone(clamp(maxE / 5, 0, 1));
-    this.drawSpeedLines(clamp((maxE - 3) / 4, 0, 1) * 0.8 + this.flash * 0.5);
+    this.drawScreentone(toneI);
+    this.drawSpeedLines(rayI);
 
     players.forEach((p, i) => this.drawSkeleton(p.lm, P_COLOR[i], p.energy, mirror));
 
-    // grano (patron cacheado)
-    x.save(); x.globalAlpha = 0.5; x.fillStyle = this.grainPat;
-    x.translate((this.t * 60) % 140 - 140, (this.t * 37) % 140 - 140);
-    x.fillRect(0, 0, c.width + 140, c.height + 140); x.restore();
+    // grano: un relleno de pantalla completa. Cada 2 frames alcanza para el
+    // efecto y libera medio presupuesto de pixeles a 60fps.
+    if (this.frameNo % 2 === 0) {
+      x.save(); x.globalAlpha = 0.5; x.fillStyle = this.grainPat;
+      x.translate((this.t * 60) % 140 - 140, (this.t * 37) % 140 - 140);
+      x.fillRect(0, 0, c.width + 140, c.height + 140); x.restore();
+    }
 
     players.forEach((p, i) => { if (i < active) this.drawPod(p, i, true); });
     this.drawChrome(status);
