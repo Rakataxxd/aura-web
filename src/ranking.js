@@ -29,11 +29,24 @@ export const aliasValido = (a) => /^[\p{L}\p{N} ._-]{2,14}$/u.test(String(a || '
 async function pedir(ruta, opciones = {}) {
   // Sin timeout, un backend caido deja la pantalla colgada para siempre: no
   // hay estado de "cargando" que aguante eso en una app de 15 segundos.
-  const corte = AbortSignal.timeout(8000);
-  const res = await fetch(`${API}${ruta}`, { ...opciones, signal: corte });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  //
+  // A mano y no con AbortSignal.timeout(): ese metodo no existe en iOS
+  // Safari anterior al 16, y ahi la llamada tiraba TypeError ANTES de salir
+  // a la red — o sea que el telefono mas viejo ni intentaba subir el
+  // puntaje. AbortController existe en todos lados.
+  const ac = new AbortController();
+  const reloj = setTimeout(() => ac.abort(), 6000);
+  try {
+    const res = await fetch(`${API}${ruta}`, { ...opciones, signal: ac.signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  } catch (e) {
+    if (e?.name === 'AbortError') throw new Error('tardó demasiado');
+    throw e;
+  } finally {
+    clearTimeout(reloj);
+  }
 }
 
 /** Sube una partida. Devuelve {aura, pais, region}. */

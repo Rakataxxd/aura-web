@@ -259,7 +259,7 @@ export const MOVES = [
     // asi que juntar las tres que exige el gesto cuesta 0.80 s. Con cd 1.5
     // el reloj mandaba y no la persona — los disparos salian clavados cada
     // 1.53 s por mas rapido que se hiciera, que es el "casi no lo detecta".
-    id: 'six-seven', name: '6-7', bonus: 18000, cd: 0.6, temporal: true,
+    id: 'six-seven', name: '6-7', bonus: 18000, cd: 0.45, temporal: true,
     needs: ARMS,
     line: 'SEIS… SIETE. CONFIRMADO.',
   },
@@ -405,7 +405,7 @@ const BY_ID = Object.fromEntries(MOVES.map((m) => [m.id, m]));
  * sigue contando UNA vez, que es lo unico que este numero tiene que
  * garantizar (lo verifica `sostenido_debe_ser_1` en movetest.js).
  */
-const REARME = 0.18;
+const REARME = 0.12;
 /**
  * ...o cuanto tiene que ALEJARSE la mano del punto exacto donde disparo.
  *
@@ -422,7 +422,7 @@ const REARME = 0.18;
  * A 0.35 sobra margen contra el temblor y se re-arma antes, que es lo que
  * hace que spamear un gesto rinda.
  */
-const REARME_DIST = 0.35;
+const REARME_DIST = 0.25;
 /**
  * ...y aun soltandolo, no puede repetirse mas rapido que esto.
  * 0.30, no 0.45 ni 0.7: en video real los dabs seguidos salen cada ~0.55 s,
@@ -430,7 +430,7 @@ const REARME_DIST = 0.35;
  * promedio se perdia. A 0.30 el techo lo pone el cuerpo, no el reloj: el
  * gesto igual tiene que cumplir su `hold` y volver a armarse.
  */
-const ANTIREBOTE = 0.30;
+const ANTIREBOTE = 0.22;
 /**
  * Velocidad a la que se pierde el `hold` acumulado cuando el test falla,
  * en segundos de gesto por segundo. Con 1.6 un gesto que pasa 2 de cada 3

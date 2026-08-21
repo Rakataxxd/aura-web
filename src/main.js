@@ -522,11 +522,13 @@ async function finish() {
 // ---------- torneo ----------
 let ultimaPartida = null;     // {aura, moves} de la ronda recien cerrada
 let subida = null;            // respuesta del worker: {pais, region}
+let yaSubida = false;         // esta ronda ya se anoto
 let ambito = 'global', periodo = 'dia';
 
 function prepararAlta() {
   el.alta.classList.toggle('hidden', !hayApi());
   if (!hayApi()) return;
+  yaSubida = false;
   el.alias.value = getAlias();
   el.subir.disabled = false;
   el.subir.textContent = 'ENTRAR AL TORNEO';
@@ -542,6 +544,10 @@ el.alias?.addEventListener('focus', () => {
 });
 
 el.subir?.addEventListener('click', async () => {
+  // Ya anotada: el boton pasa a ser el atajo a la tabla. Volver a mandar la
+  // misma ronda crearia una fila duplicada con el mismo puntaje.
+  if (yaSubida) { abrirRanking(); return; }
+
   const alias = el.alias.value.trim();
   if (!aliasValido(alias)) {
     el.altaMsg.textContent = 'El nombre va de 2 a 14 letras o números.';
@@ -552,18 +558,29 @@ el.subir?.addEventListener('click', async () => {
   setAlias(alias);
   el.subir.disabled = true;
   el.subir.textContent = 'SUBIENDO…';
+  el.altaMsg.textContent = '';
+  // Con el backend lento o caido eran seis segundos de "SUBIENDO…" sin una
+  // sola señal de vida, y desde afuera eso es indistinguible de colgado.
+  const lento = setTimeout(() => { el.altaMsg.textContent = 'Tardando más de lo normal…'; }, 2200);
   try {
     subida = await enviarPuntaje({ alias, ...ultimaPartida });
-    el.altaMsg.textContent = 'Anotado. Abriendo la tabla…';
+    yaSubida = true;
+    el.altaMsg.textContent = 'Anotado.';
     // El ambito arranca en el mas chico que tenga sentido: verse primero
     // entre los del barrio engancha mas que ser el puesto 4.000 del mundo.
     ambito = subida.region ? 'region' : 'pais';
     periodo = 'dia';
     abrirRanking();
   } catch (e) {
-    el.subir.disabled = false;
-    el.subir.textContent = 'REINTENTAR';
     el.altaMsg.textContent = `No se pudo subir (${e.message}). Tu puntaje no se perdió, probá de nuevo.`;
+  } finally {
+    clearTimeout(lento);
+    // PASE LO QUE PASE el boton vuelve a estar vivo. Sin este `finally` se
+    // quedaba en "SUBIENDO…" y deshabilitado despues de un alta EXITOSA: la
+    // ronda se anotaba bien, pero al tocar VOLVER desde la tabla el boton
+    // seguia gris y parecia colgado.
+    el.subir.disabled = false;
+    el.subir.textContent = yaSubida ? 'VER MI PUESTO' : 'REINTENTAR';
   }
 });
 
