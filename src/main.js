@@ -477,11 +477,13 @@ async function finish() {
     `PICO <b>${p.peakEnergy.toFixed(1)}</b>`,
     `COMBO MÁX <b>${p.combo}</b>`,
     activeCount === 2 ? `GANADOR <b>P${winner + 1}</b>` : `MODO <b>SOLO</b>`,
-    // Visible siempre, no solo en debug: es el numero que hay que poder
-    // mirar cuando el clip "no sale a 60".
-    `CLIP <b>${fpsClip.toFixed(0)} FPS · ${el.canvas.height}p</b>`,
     ...landed.map((n) => `<b>${n}</b>`),
     ...(DEBUG ? [
+      // Los FPS del clip vuelven a ser solo de debug. Los habia dejado
+      // siempre visibles para no tener que adivinar cuando "no sale a 60",
+      // pero en la pantalla de resultado de una ronda buena compiten con
+      // los moves reconocidos, que es lo unico que el jugador queria ver.
+      `CLIP <b>${fpsClip.toFixed(0)} FPS · ${el.canvas.height}p</b>`,
       // TRABAJO es el que decide dónde está el cuello:
       //   alto  -> el hilo principal está ahogado (JS/dibujo)
       //   bajo con pocos FPS -> el cuello está afuera (captura/encoder/GPU)
@@ -530,6 +532,14 @@ function prepararAlta() {
   el.subir.textContent = 'ENTRAR AL TORNEO';
   el.altaMsg.textContent = '';
 }
+
+// El teclado del telefono ocupa media pantalla y se come el boton de
+// "ENTRAR AL TORNEO" justo cuando lo vas a tocar. Al enfocar el campo se
+// trae la fila entera a la vista; el timeout es porque iOS recien reajusta
+// el viewport DESPUES del focus.
+el.alias?.addEventListener('focus', () => {
+  setTimeout(() => el.alta?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+});
 
 el.subir?.addEventListener('click', async () => {
   const alias = el.alias.value.trim();

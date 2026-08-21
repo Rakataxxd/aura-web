@@ -43,7 +43,16 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* `safe center` y no `center` a secas: centrado mientras entra, pero
+     cuando NO entra se alinea arriba en vez de desbordar por los dos lados.
+     Con `center` la parte de arriba se corta y no hay forma de llegar a
+     ella ni scrolleando — es el bug clasico de flexbox. Se veia en el
+     resultado de una ronda buena: con varios moves reconocidos el teclado
+     del telefono tapaba el boton de compartir y no habia como alcanzarlo. */
+  justify-content: safe center;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   gap: 18px;
   padding: 32px 24px var(--pad);
   text-align: center;
@@ -51,6 +60,9 @@ html, body {
   backdrop-filter: blur(6px);
   animation: fade .32s ease both;
 }
+/* Los hijos no se encogen: con el panel scrolleable, `flex-shrink` por
+   defecto aplastaba el puntaje y los botones en vez de dejar scrollear. */
+.panel > * { flex-shrink: 0; }
 .panel.bare { background: transparent; backdrop-filter: none; pointer-events: none; }
 .hidden { display: none !important; }
 
