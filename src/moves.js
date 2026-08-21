@@ -259,7 +259,7 @@ export const MOVES = [
     // asi que juntar las tres que exige el gesto cuesta 0.80 s. Con cd 1.5
     // el reloj mandaba y no la persona — los disparos salian clavados cada
     // 1.53 s por mas rapido que se hiciera, que es el "casi no lo detecta".
-    id: 'six-seven', name: '6-7', bonus: 18000, cd: 0.8, temporal: true,
+    id: 'six-seven', name: '6-7', bonus: 18000, cd: 0.6, temporal: true,
     needs: ARMS,
     line: 'SEIS… SIETE. CONFIRMADO.',
   },
@@ -398,8 +398,14 @@ export const MOVES = [
 
 const BY_ID = Object.fromEntries(MOVES.map((m) => [m.id, m]));
 
-/** Cuanto hay que SOLTAR el gesto para que vuelva a contar. */
-const REARME = 0.25;
+/**
+ * Cuanto hay que SOLTAR el gesto para que vuelva a contar.
+ * 0.18, no 0.25: spamear un gesto es la forma de farmear y 0.25 s de pausa
+ * obligada entre repeticiones se sentia como un freno. Sostener la pose
+ * sigue contando UNA vez, que es lo unico que este numero tiene que
+ * garantizar (lo verifica `sostenido_debe_ser_1` en movetest.js).
+ */
+const REARME = 0.18;
 /**
  * ...o cuanto tiene que ALEJARSE la mano del punto exacto donde disparo.
  *
@@ -413,15 +419,18 @@ const REARME = 0.25;
  * Lo que si separa "repetir" de "sostener" es la MANO: MEDIDO, entre dos
  * dabs la muñeca se va a 0.9 torsos del punto donde disparo el anterior,
  * mientras que sosteniendo la pose el temblor de MediaPipe no pasa de 0.06.
- * A 0.45 no hay como confundirlos.
+ * A 0.35 sobra margen contra el temblor y se re-arma antes, que es lo que
+ * hace que spamear un gesto rinda.
  */
-const REARME_DIST = 0.45;
+const REARME_DIST = 0.35;
 /**
  * ...y aun soltandolo, no puede repetirse mas rapido que esto.
- * 0.45, no 0.7: en video real los dabs seguidos salen cada ~0.6 s y el
- * segundo caia dentro del antirrebote del primero.
+ * 0.30, no 0.45 ni 0.7: en video real los dabs seguidos salen cada ~0.55 s,
+ * asi que 0.45 le pasaba raspando y cualquier repeticion mas rapida que el
+ * promedio se perdia. A 0.30 el techo lo pone el cuerpo, no el reloj: el
+ * gesto igual tiene que cumplir su `hold` y volver a armarse.
  */
-const ANTIREBOTE = 0.45;
+const ANTIREBOTE = 0.30;
 /**
  * Velocidad a la que se pierde el `hold` acumulado cuando el test falla,
  * en segundos de gesto por segundo. Con 1.6 un gesto que pasa 2 de cada 3

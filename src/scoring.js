@@ -74,14 +74,20 @@ export class Player {
 
     // --- moves con nombre (Nivel 2): bonus fuerte + callout dorado ---
     for (const m of this.moves.feed(met || lm, dt)) {
-      // Repetir el MISMO move rinde cada vez menos.
+      // Repetir el MISMO move rinde cada vez menos, pero POCO menos.
       //
-      // El detector ahora deja repetir un gesto apenas lo soltas (antes habia
-      // un cooldown de 5s que se sentia como "no me lo detecta"). Sin esto,
-      // hacer mewing diez veces seguidas ganaria la ronda sola. Asi repetir
-      // siempre RESPONDE —se ve el callout, cuenta— pero deja de pagar.
+      // El detector deja repetir un gesto apenas lo soltas (antes habia un
+      // cooldown de 5s que se sentia como "no me lo detecta"). La caida
+      // existe para que hacer mewing diez veces no gane la ronda sola.
+      //
+      // ×0.8 con piso 0.45, no ×0.6 con piso 0.25: spamear ES la forma de
+      // farmear y con la curva vieja la cuarta repeticion ya pagaba el
+      // minimo. MEDIDO sobre los tres videos, cinco dabs seguidos pasaban de
+      // 39,360 a 54,432 de bonus. Variar de gesto sigue rindiendo mas que
+      // machacar uno solo —cada move lleva su propia cuenta— pero machacar
+      // ya no se siente inutil.
       const veces = (this.veces[m.id] = (this.veces[m.id] ?? 0) + 1);
-      const bonus = Math.round(m.bonus * Math.max(0.25, Math.pow(0.6, veces - 1)));
+      const bonus = Math.round(m.bonus * Math.max(0.45, Math.pow(0.8, veces - 1)));
       this.aura += bonus;
       this.landed.push(m.name);
       this.emit('signature', m.name, bonus);
