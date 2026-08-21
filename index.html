@@ -19,12 +19,22 @@
     <video id="cam" playsinline muted></video>
     <canvas id="view"></canvas>
 
+    <!-- Cara del rival. Va FUERA del canvas a proposito: el clip que se
+         descarga graba el canvas, y nadie se lleva grabada la cara de un
+         desconocido a su galeria. -->
+    <div class="rival hidden" id="rivalCaja">
+      <video id="rivalVid" playsinline autoplay muted></video>
+      <div class="rival-aura"><b id="rivalAura">0</b></div>
+      <button class="rival-saltar" id="rivalSaltar" title="Saltar rival">SALTAR</button>
+    </div>
+
     <!-- INTRO -->
     <section class="panel" id="intro">
       <div class="tape">SISTEMA DE MEDICIÓN NO CERTIFICADO</div>
       <h1>ESCÁNER<br /><em>DE AURA</em></h1>
       <p class="lede">Poné la cámara. Movete 15 segundos.<br />El escáner hace el resto.</p>
       <button class="btn" id="go">ESCANEAR MI AURA</button>
+      <button class="btn ghost hidden" id="irVersus">BATALLA ONLINE</button>
       <button class="btn ghost hidden" id="verRank">VER RANKING</button>
       <p class="fine" id="note">Tu video nunca sale de tu teléfono. Todo corre acá.</p>
     </section>
@@ -58,6 +68,31 @@
       <button class="btn" id="share">DESCARGAR CLIP</button>
       <button class="btn ghost" id="again">OTRA VEZ</button>
       <p class="fine" id="rNote"></p>
+    </section>
+
+    <!-- VERSUS: elegir modo -->
+    <section class="panel hidden" id="versus">
+      <div class="tape">BATALLA ONLINE</div>
+      <p class="lede">15 segundos, uno contra uno.<br />Gana el que junte más aura.</p>
+      <button class="btn" id="vsBuscar">BUSCAR RIVAL</button>
+      <div class="rank-alta">
+        <input id="vsCodigo" class="alias" maxlength="4" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" placeholder="CÓDIGO" />
+        <button class="btn small" id="vsEntrar">ENTRAR</button>
+      </div>
+      <button class="btn ghost" id="vsCrear">CREAR SALA CON AMIGOS</button>
+      <p class="fine" id="vsMsg"></p>
+      <button class="btn ghost" id="vsVolver">VOLVER</button>
+    </section>
+
+    <!-- VERSUS: sala de espera -->
+    <section class="panel hidden" id="sala">
+      <div class="tape">SALA</div>
+      <div class="codigo" id="salaCodigo">····</div>
+      <p class="lede" id="salaMsg">Esperando rival…</p>
+      <div class="spinner"></div>
+      <p class="fine" id="salaFine">Pasale el código a quien quieras retar.</p>
+      <button class="btn ghost" id="salaSalir">CANCELAR</button>
     </section>
 
     <!-- RANKING -->

@@ -7,6 +7,7 @@ import { detectDap, DAP, brazosCortados } from './moves.js';
 import { toMetric } from './landmarks.js';
 import { verdictFor } from './roasts.js';
 import { hayApi, getAlias, setAlias, aliasValido, enviarPuntaje, traerRanking, nombrePais } from './ranking.js';
+import { Batalla, hayVersus, codigoNuevo, codigoValido } from './versus.js';
 
 const ROUND_SECONDS = 15;
 const DEBUG = new URLSearchParams(location.search).has('debug');
@@ -16,16 +17,21 @@ const $ = (id) => document.getElementById(id);
 const el = {
   video: $('cam'), canvas: $('view'),
   intro: $('intro'), loading: $('loading'), count: $('count'), result: $('result'), oops: $('oops'),
-  rank: $('rank'),
+  rank: $('rank'), versus: $('versus'), sala: $('sala'),
+  irVersus: $('irVersus'), vsBuscar: $('vsBuscar'), vsCodigo: $('vsCodigo'), vsEntrar: $('vsEntrar'),
+  vsCrear: $('vsCrear'), vsMsg: $('vsMsg'), vsVolver: $('vsVolver'),
+  salaCodigo: $('salaCodigo'), salaMsg: $('salaMsg'), salaFine: $('salaFine'), salaSalir: $('salaSalir'),
+  rivalCaja: $('rivalCaja'), rivalVid: $('rivalVid'), rivalAura: $('rivalAura'), rivalSaltar: $('rivalSaltar'),
   go: $('go'), share: $('share'), again: $('again'), retry: $('retry'),
   countnum: $('countnum'), loadmsg: $('loadmsg'), oopsmsg: $('oopsmsg'),
   rScore: $('rScore'), rTitle: $('rTitle'), rSub: $('rSub'), rStats: $('rStats'), rNote: $('rNote'),
+  rTape: $('rTape'),
   verRank: $('verRank'), alta: $('alta'), alias: $('alias'), subir: $('subir'), altaMsg: $('altaMsg'),
   tabAmbito: $('tabAmbito'), tabPeriodo: $('tabPeriodo'),
   rankDonde: $('rankDonde'), tabla: $('tabla'), rankYo: $('rankYo'), rankVolver: $('rankVolver'),
 };
 
-const PANELES = ['intro', 'loading', 'count', 'result', 'oops', 'rank'];
+const PANELES = ['intro', 'loading', 'count', 'result', 'oops', 'rank', 'versus', 'sala'];
 const show = (...ids) => {
   for (const k of PANELES) el[k].classList.toggle('hidden', !ids.includes(k));
 };
@@ -137,6 +143,9 @@ function onLandmarks(landmarks, tsMs) {
   if (state !== 'running') return;
 
   players.forEach((p, i) => p.update(crudos[i], t, metricos[i]));
+  // El aura viaja al rival desde aca y no desde el bucle de dibujo: es el
+  // unico lugar donde el numero cambio de verdad.
+  if (modo === 'versus') batalla?.aura(players[0].aura);
 
   // DAP: no es de un jugador, es del par. Se sostiene: con un solo frame
   // coincidente cualquier mano que pasara cerca de la otra contaba.
@@ -242,18 +251,26 @@ function pararDeteccion() {
   bombeando = false;
 }
 
-async function boot() {
+/**
+ * Camara + modelo listos. `arrancarYa` en false deja todo cargado SIN
+ * empezar la ronda, que es lo que necesita la batalla online: el permiso de
+ * camara y el modelo tardan, y hacer esperar al rival mientras tanto es peor
+ * que esperar uno mismo antes de entrar a la sala.
+ * @returns {Promise<boolean>} si quedo listo
+ */
+async function boot(arrancarYa = true) {
   el.go.disabled = true;
   show('loading');
   try {
     el.loadmsg.textContent = 'PIDIENDO CÁMARA…';
     stream = await openCamera(el.video);
   } catch (e) {
-    return fail(
+    fail(
       e?.name === 'NotAllowedError'
         ? 'Necesito permiso de cámara. Activalo y reintentá.'
         : 'No encontré cámara en este dispositivo.'
     );
+    return false;
   }
   try {
     el.loadmsg.textContent = prefetchPct >= 1 ? 'CALIBRANDO SENSORES…' : `DESCARGANDO SENSORES… ${Math.round(prefetchPct * 100)}%`;
@@ -277,11 +294,13 @@ async function boot() {
     if (document.fonts?.ready) await document.fonts.ready;
   } catch (e) {
     console.error(e);
-    return fail('No se pudo cargar el modelo. Revisá tu conexión.');
+    fail('No se pudo cargar el modelo. Revisá tu conexión.');
+    return false;
   }
   renderer = new Renderer(el.canvas);
   recorder = new Recorder(el.canvas);
-  countdown();
+  if (arrancarYa) countdown();
+  return true;
 }
 
 function countdown() {
@@ -469,6 +488,9 @@ async function finish() {
   const aura = Math.round(p.aura);
   const v = verdictFor(aura);
 
+  // La cinta la puede haber pisado una batalla anterior con GANASTE/PERDISTE.
+  el.rTape.textContent = 'VEREDICTO';
+  el.rTape.classList.remove('alert');
   el.rScore.textContent = aura.toLocaleString('es-GT');
   el.rTitle.textContent = v.t;
   el.rSub.textContent = v.s;
@@ -501,6 +523,31 @@ async function finish() {
     ? `${v.s}  Reconocí: ${landed.join(', ')}.`
     : `${v.s} No detecté ningún movimiento con nombre.`;
 
+  // --- batalla online: comparar contra el rival ---
+  if (modo === 'versus' && batalla) {
+    console.info('[versus] termino mi ronda, mando fin', { aura, tengoFinRival: !!finRival });
+    batalla.fin(aura, landed);
+    // El `fin` del rival puede llegar despues del nuestro: su ronda arranco
+    // unas decimas mas tarde (la orden de arrancar viaja). Se le da margen y
+    // si no llega, se dice que no llego en vez de inventar un ganador.
+    if (!finRival) {
+      const t0 = performance.now();
+      while (!finRival && performance.now() - t0 < 3500) await new Promise((r) => setTimeout(r, 100));
+    }
+    if (finRival) {
+      const gane = aura > finRival.aura;
+      const empate = aura === finRival.aura;
+      el.rTape.textContent = empate ? 'EMPATE' : (gane ? 'GANASTE' : 'PERDISTE');
+      el.rTape.classList.toggle('alert', !gane && !empate);
+      el.rSub.textContent = `${empate ? 'Empate' : (gane ? 'Le ganaste' : 'Te ganó')} por ${Math.abs(aura - finRival.aura).toLocaleString('es-GT')} de aura. `
+        + `Rival: ${finRival.aura.toLocaleString('es-GT')}${finRival.moves.length ? ` (${finRival.moves.join(', ')})` : ''}.`;
+    } else {
+      el.rTape.textContent = 'SIN RIVAL';
+      el.rSub.textContent = 'El rival se fue antes de terminar. Tu aura cuenta igual.';
+    }
+    cerrarBatalla();
+  }
+
   // Lo que se sube al torneo. Se guarda al cerrar la ronda y no se recalcula
   // despues: `players` se reinicia en "otra vez" y el alias se puede escribir
   // en cualquier momento, incluso con otra ronda ya empezando.
@@ -518,6 +565,124 @@ async function finish() {
   }
   show('result');
 }
+
+// ---------- batalla online ----------
+let modo = 'solo';            // 'solo' | 'versus'
+let batalla = null;
+let auraRival = 0;
+let finRival = null;
+
+function mostrarRival(on) {
+  el.rivalCaja.classList.toggle('hidden', !on);
+  if (!on) { el.rivalVid.srcObject = null; el.rivalAura.textContent = '0'; }
+}
+
+function cerrarBatalla() {
+  batalla?.cerrar();
+  batalla = null;
+  modo = 'solo';
+  auraRival = 0;
+  finRival = null;
+  mostrarRival(false);
+}
+
+/**
+ * Entra a una sala. La camara y el modelo se cargan ANTES de conectarse:
+ * pedir permiso de camara con un rival ya esperando del otro lado es la
+ * forma mas facil de que el otro se vaya.
+ */
+async function entrarASala(codigo) {
+  modo = 'versus';
+  auraRival = 0;
+  finRival = null;
+  if (!await boot(false)) { modo = 'solo'; return; }
+
+  el.salaCodigo.textContent = codigo;
+  el.salaMsg.textContent = 'Esperando rival…';
+  el.salaFine.textContent = 'Pasale el código a quien quieras retar.';
+  show('sala');
+
+  batalla = new Batalla({
+    onEstado: (e, extra) => {
+      if (e === 'listos') {
+        el.salaMsg.textContent = '¡Rival encontrado!';
+        el.salaFine.textContent = 'Arrancando…';
+        mostrarRival(true);
+        // Solo el anfitrion da la orden, si no habria dos cuentas
+        // regresivas. El margen es para que el video alcance a negociar;
+        // si no llega, la partida arranca igual y se juega a ciegas.
+        if (extra?.rol === 'anfitrion') {
+          setTimeout(() => { if (batalla?.arrancar()) countdown(); }, 1600);
+        }
+      } else if (e === 'arranca') {
+        countdown();
+      } else if (e === 'llena') {
+        el.salaMsg.textContent = 'Esa sala ya tiene dos jugadores.';
+        el.salaFine.textContent = 'Probá con otro código.';
+        cerrarBatalla();
+      } else if (e === 'rival-se-fue') {
+        // A mitad de ronda NO se corta: se termina jugando solo y el aura
+        // cuenta igual. Cortar la ronda por un rival que se fue seria
+        // castigar al que se quedo.
+        if (state === 'running' || state === 'countdown') {
+          el.rivalAura.textContent = '—';
+        } else {
+          el.salaMsg.textContent = 'El rival se fue.';
+          el.salaFine.textContent = 'Buscá otro o volvé al menú.';
+          cerrarBatalla();
+        }
+      } else if (e === 'error') {
+        el.salaMsg.textContent = 'Se cortó la conexión.';
+        cerrarBatalla();
+      }
+    },
+    onAuraRival: (v) => { auraRival = v; el.rivalAura.textContent = v.toLocaleString('es-GT'); },
+    onFinRival: (r) => { finRival = r; },
+    onVideoRival: (s) => { el.rivalVid.srcObject = s; },
+  });
+  batalla.entrar(codigo, stream);
+}
+
+el.irVersus?.addEventListener('click', () => {
+  startPrefetch();
+  el.vsMsg.textContent = '';
+  el.vsCodigo.value = '';
+  show('versus');
+});
+el.vsVolver?.addEventListener('click', () => { cerrarBatalla(); el.go.disabled = false; show('intro'); });
+el.vsCrear?.addEventListener('click', () => entrarASala(codigoNuevo()));
+el.vsEntrar?.addEventListener('click', () => {
+  const c = el.vsCodigo.value.trim().toUpperCase();
+  if (!codigoValido(c)) { el.vsMsg.textContent = 'El código son 4 letras o números.'; return; }
+  entrarASala(c);
+});
+el.vsBuscar?.addEventListener('click', async () => {
+  el.vsBuscar.disabled = true;
+  el.vsMsg.textContent = 'Buscando rival…';
+  try {
+    // La cola solo reparte el codigo; despues los dos entran a la misma
+    // sala por el mismo camino que los amigos. Una sola implementacion de
+    // sala en vez de dos que hay que mantener sincronizadas.
+    const codigo = await new Batalla().buscarRival();
+    await entrarASala(codigo);
+  } catch (e) {
+    el.vsMsg.textContent = `${e.message}. Probá de nuevo o armá una sala con código.`;
+  } finally {
+    el.vsBuscar.disabled = false;
+  }
+});
+el.salaSalir?.addEventListener('click', () => { cerrarBatalla(); show('versus'); });
+el.rivalSaltar?.addEventListener('click', () => {
+  batalla?.saltar();
+  cerrarBatalla();
+  cancelAnimationFrame(raf);
+  pararDeteccion();
+  stream?.getTracks().forEach((t) => t.stop());
+  state = 'idle';
+  el.go.disabled = false;
+  show('versus');
+});
+if (hayVersus()) el.irVersus?.classList.remove('hidden');
 
 // ---------- torneo ----------
 let ultimaPartida = null;     // {aura, moves} de la ronda recien cerrada

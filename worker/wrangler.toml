@@ -11,6 +11,20 @@ binding = "DB"
 database_name = "aura-ranking"
 database_id = "9b4395e4-ee51-49b9-8a2b-467f50604e8f"
 
+# Salas de batalla. `new_sqlite_classes` y no `new_classes`: los Durable
+# Objects respaldados por SQLite entran en el plan gratis, los de KV no.
+[[durable_objects.bindings]]
+name = "SALAS"
+class_name = "Sala"
+
+[[durable_objects.bindings]]
+name = "LOBBY"
+class_name = "Lobby"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sala", "Lobby"]
+
 [vars]
 # Origenes que pueden pegarle. Se compara EXACTO contra el header Origin.
 # Si publicas en otro lado, agregalo aca separado por coma.

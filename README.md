@@ -184,6 +184,35 @@ await m.run(15, { versus: true, live: false, stopFrac: 0.5, poster: true })
 
 `poster: true` fuerza el peor caso visual (nombre largo + crítico + frase a la vez) para verificar que nada se desborde en pantalla angosta.
 
+## Batalla online (rival al azar o sala con código)
+
+Uno contra uno, 15 segundos, gana el que junte más aura. Dos formas de entrar: **BUSCAR RIVAL** te mete en una cola con desconocidos, o **CREAR SALA** te da un código de 4 caracteres para dictarle a un amigo. El alfabeto de los códigos no tiene `O`, `0`, `I` ni `1`, justamente porque se dictan por teléfono.
+
+### Dos canales, a propósito
+
+| qué | por dónde | por qué |
+|---|---|---|
+| estado del juego (listos, arranca, aura en vivo, resultado) | WebSocket contra un Durable Object | barato, confiable, ordenado |
+| video del rival | WebRTC peer to peer | mandar video por un Worker costaría plata y sumaría un salto de latencia por cuadro |
+
+Separarlos es lo que hace que **la batalla funcione aunque el video nunca conecte**. Entre dos NAT hostiles y sin servidor TURN eso pasa seguido; se pierde verse las caras, no la partida. Al revés —todo por el data channel de WebRTC— una negociación fallida se llevaba puesto el partido entero.
+
+El primero en entrar es el **anfitrión**: es el único que manda la oferta WebRTC y el único que da la orden de arrancar. Sin un rol fijo los dos ofrecían a la vez, la negociación entraba en colisión y no cerraba nunca, y salían dos cuentas regresivas.
+
+### Decisiones sobre desconocidos
+
+Video al azar con desconocidos es el patrón que terminó cerrando Omegle. Tres cosas acotan la superficie:
+
+- **No es chat abierto.** El video se ve durante los 15 segundos de la ronda y se corta.
+- **SALTAR** está siempre visible sobre el recuadro del rival.
+- **La cara del rival no entra en tu clip.** El recuadro vive en el DOM, sobre el canvas, no dentro: `captureStream()` graba el canvas, así que nadie se lleva grabada la cara de un desconocido a la galería.
+
+El relay tiene lista blanca de mensajes: lo que no es del protocolo no se reenvía. El handshake del WebSocket valida `Origin` a mano, porque el navegador no le aplica CORS.
+
+### Durable Objects en el plan gratis
+
+`new_sqlite_classes` en la migración, no `new_classes`: los Durable Objects respaldados por SQLite entran en el plan gratis, los de KV no.
+
 ## Torneo (rankings global / nacional / regional)
 
 En vivo: **https://rakataxxd.github.io/aura-web/** · backend: `https://aura-ranking.rakataxxd.workers.dev` (D1 `aura-ranking`).

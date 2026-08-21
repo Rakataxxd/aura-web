@@ -13,6 +13,9 @@
 //                     [&alias=x] [&limite=50]
 //   GET  /api/salud
 
+import { Sala, Lobby, codigoValido } from './salas.js';
+export { Sala, Lobby };
+
 const LIMITE_MAX = 100;
 // Techo de cordura. Una ronda son 15 segundos: ni bailando como un demonio
 // se llega a esto. Todo lo de arriba es alguien tocando el fetch a mano.
@@ -117,6 +120,23 @@ export default {
 
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(req, env) });
     if (url.pathname === '/api/salud') return json({ ok: true }, req, env);
+
+    // --- batalla online ---
+    // Los WebSocket NO pasan por `cors()`: el navegador no aplica CORS al
+    // handshake de un WebSocket, asi que el chequeo se hace a mano contra el
+    // header Origin. Sin esto cualquier pagina podria abrir salas.
+    if (url.pathname === '/api/sala' || url.pathname === '/api/cola') {
+      const origen = req.headers.get('Origin') || '';
+      const permitidos = (env.ORIGENES || '').split(',').map((s) => s.trim()).filter(Boolean);
+      if (!permitidos.includes(origen)) return new Response('origen no permitido', { status: 403 });
+
+      if (url.pathname === '/api/cola') {
+        return env.LOBBY.get(env.LOBBY.idFromName('cola')).fetch(req);
+      }
+      const codigo = (url.searchParams.get('codigo') || '').toUpperCase();
+      if (!codigoValido(codigo)) return new Response('codigo invalido', { status: 400 });
+      return env.SALAS.get(env.SALAS.idFromName(codigo)).fetch(req);
+    }
 
     const pais = (req.cf?.country || 'XX').toUpperCase();
     // `regionCode` es corto y estable (GT-16); `region` es el nombre largo.

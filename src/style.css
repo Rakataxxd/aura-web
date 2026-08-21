@@ -254,6 +254,60 @@ h2 {
 .tabla li.podio .pos { color: var(--gold); font-size: 15px; }
 .tabla .vacio { display: block; text-align: center; opacity: .5; padding: 18px 0; }
 
+/* ---------- batalla online ---------- */
+.codigo {
+  font-family: "Share Tech Mono", monospace;
+  font-size: clamp(44px, 14vw, 76px);
+  letter-spacing: .22em;
+  color: var(--acid);
+  text-shadow: 4px 0 var(--magenta), -4px 0 #00e5ff;
+  padding-left: .22em;   /* compensa el tracking del ultimo caracter */
+}
+
+/* La cara del rival vive sobre el canvas, no adentro.
+   Abajo a la derecha y no arriba: arriba estan el titulo y el cronometro de
+   la ronda, y el recuadro los tapaba justo cuando hay que mirarlos. */
+.rival {
+  position: absolute;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  width: min(30vw, 150px);
+  z-index: 5;
+  border: 2px solid var(--acid);
+  background: #000;
+  box-shadow: 4px 4px 0 var(--magenta);
+}
+.rival video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  transform: scaleX(-1);      /* espejo, igual que la camara propia */
+  background: #000;
+}
+.rival-aura {
+  font-family: "Share Tech Mono", monospace;
+  font-size: 13px;
+  text-align: center;
+  padding: 3px 0;
+  background: rgba(10, 10, 12, .85);
+  border-top: 1px solid rgba(201, 255, 46, .3);
+}
+.rival-aura b { color: var(--acid); font-weight: 400; font-variant-numeric: tabular-nums; }
+.rival-saltar {
+  display: block;
+  width: 100%;
+  font-family: "Share Tech Mono", monospace;
+  font-size: 11px;
+  letter-spacing: .1em;
+  padding: 5px 0;
+  color: var(--bone);
+  background: rgba(255, 45, 111, .85);
+  border: 0;
+  cursor: pointer;
+}
+.rival-saltar:hover { background: var(--magenta); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
