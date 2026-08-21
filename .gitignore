@@ -5,3 +5,14 @@ dist
 
 # video de prueba: solo para verificar deteccion en local, no se publica
 public/testdata
+
+# worker de Cloudflare
+worker/.wrangler
+worker/node_modules
+
+# override local del backend (.env SI se versiona: la URL no es secreta
+# y sin ella el build sale sin ranking sin avisar)
+.env.*.local
+
+# scratch de diagnostico (mosaicos de frames)
+.tmp

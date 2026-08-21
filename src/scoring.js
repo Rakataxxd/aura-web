@@ -41,14 +41,25 @@ export class Player {
     this.draining = false;
     this.moves = new MoveDetector();
     this.landed = [];      // moves con nombre acertados en la ronda
+    this.veces = {};       // cuantas veces cayo cada uno (rinde decreciente)
   }
 
   emit(kind, text, value = 0) {
     this.events.push({ kind, text, value, player: this.id });
   }
 
-  /** lm = array de 33 landmarks {x,y,visibility} en 0..1, o null si se perdio */
-  update(lm, t) {
+  /**
+   * lm  = 33 landmarks CRUDOS de MediaPipe {x,y,visibility} en 0..1, o null.
+   * met = los mismos en espacio metrico (toMetric), o null.
+   *
+   * La energia se queda con los crudos A PROPOSITO: es un numero de sensacion,
+   * ya calibrado contra video real (IDLE, umbral de crit, de hype). Pasarla a
+   * metrico la escalaria ~1.4x en apaisado y ~0.8x en vertical y habria que
+   * recalibrar toda la economia de aura para no ganar nada. La GEOMETRIA de
+   * los moves si necesita metrico, porque ahi los umbrales son distancias
+   * reales del cuerpo.
+   */
+  update(lm, t, met = null) {
     const dt = clamp(t - (this.prevT || t), 1 / 120, 0.2);
     this.prevT = t;
 
@@ -62,10 +73,18 @@ export class Player {
     this.lost = 0;
 
     // --- moves con nombre (Nivel 2): bonus fuerte + callout dorado ---
-    for (const m of this.moves.feed(lm, dt)) {
-      this.aura += m.bonus;
+    for (const m of this.moves.feed(met || lm, dt)) {
+      // Repetir el MISMO move rinde cada vez menos.
+      //
+      // El detector ahora deja repetir un gesto apenas lo soltas (antes habia
+      // un cooldown de 5s que se sentia como "no me lo detecta"). Sin esto,
+      // hacer mewing diez veces seguidas ganaria la ronda sola. Asi repetir
+      // siempre RESPONDE —se ve el callout, cuenta— pero deja de pagar.
+      const veces = (this.veces[m.id] = (this.veces[m.id] ?? 0) + 1);
+      const bonus = Math.round(m.bonus * Math.max(0.25, Math.pow(0.6, veces - 1)));
+      this.aura += bonus;
       this.landed.push(m.name);
-      this.emit('signature', m.name, m.bonus);
+      this.emit('signature', m.name, bonus);
       this.moveCooldown = 2.5;   // que un nombre inventado no le pise el momento
       if (m.line) { this.lineCooldown = 2.6; this.emit('line', m.line); }
     }

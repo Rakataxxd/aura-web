@@ -31,7 +31,7 @@ export class Recorder {
   start(fps = 60) {
     if (!this.supported) return false;
     this.chunks = [];
-    const stream = this.canvas.captureStream(fps);
+    const stream = this.stream = this.canvas.captureStream(fps);
     // Medido: Chrome entrega ~2.4x el bitrate pedido con esta cantidad de
     // movimiento. 3.5M -> ~8Mbps reales -> ~14MB por clip de 15s a 60fps,
     // que todavia se comparte bien con datos moviles.
@@ -47,11 +47,39 @@ export class Recorder {
     return true;
   }
 
+  /**
+   * Corta y tira lo grabado, y suelta la captura del canvas.
+   *
+   * Para el ENSAYO de la cuenta regresiva: capturar el canvas no es gratis
+   * en todos lados (en iOS es lo mas caro de todo el frame) y ese costo
+   * aparece SOLO al grabar. Medir el rendimiento sin el grabador puesto daba
+   * 60fps y despues la ronda se caia a 12. Se graba en falso mientras corre
+   * la cuenta, se descarta, y recien ahi se decide la resolucion.
+   */
+  cancelar() {
+    try { if (this.rec && this.rec.state !== 'inactive') this.rec.stop(); } catch { /* noop */ }
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.chunks = [];
+    this.rec = null;
+    this.stream = null;
+  }
+
   stop() {
     return new Promise((resolve) => {
-      if (!this.rec || this.rec.state === 'inactive') return resolve(null);
+      const soltar = () => {
+        // OBLIGATORIO. Parar el MediaRecorder NO corta la captura del canvas:
+        // el track de captureStream sigue vivo y sigue leyendo el canvas en
+        // cada frame. Sin esto, la ronda 2 corria con DOS capturas del mismo
+        // canvas encima, la 3 con tres. En iOS, donde capturar el canvas es
+        // lo mas caro del frame, eso es exactamente "el primer clip salio a
+        // 60 y el segundo bajo".
+        this.stream?.getTracks().forEach((t) => t.stop());
+        this.stream = null;
+      };
+      if (!this.rec || this.rec.state === 'inactive') { soltar(); return resolve(null); }
       this.rec.onstop = () => {
         const type = this.rec.mimeType || this.mime || 'video/webm';
+        soltar();
         resolve(new Blob(this.chunks, { type }));
       };
       this.rec.stop();

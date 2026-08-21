@@ -29,6 +29,11 @@ export class Renderer {
     this.line = { text: '', life: 0, color: BONE };
     this.t = 0;
     this.disp = [0, 0];   // aura mostrada (persigue a la real)
+    this.fontCache = new Map();
+    // Gobernador de calidad, ver `gobernar()`.
+    this.dts = [];
+    this.nivel = 0;
+    this.enNivel = 0;
     this.grain = this.makeGrain();
     this.grainPat = this.x.createPattern(this.grain, 'repeat');   // crear el patron por frame costaba caro
     this.tone = this.makeTone();
@@ -69,15 +74,30 @@ export class Renderer {
 
   get u() { return Math.min(this.c.width, this.c.height) / 100; }
 
-  /** Baja el tamano hasta que el texto quepa. Sin esto se desborda en vertical. */
+  /**
+   * Baja el tamano hasta que el texto quepa. Sin esto se desborda en vertical.
+   *
+   * Cacheado: el texto de un callout no cambia en sus 2.4s de vida, pero esto
+   * corria en CADA frame y podia asignar `ctx.font` catorce veces. Asignar
+   * font parsea el shorthand y busca la familia: es de lo mas caro del canvas
+   * 2D y es costo de CPU, justo lo que le falta a un telefono.
+   */
   fitFont(text, maxW, size, family, weight = '') {
     const { x } = this;
+    const clave = `${text}|${maxW | 0}|${size | 0}|${family}|${weight}`;
+    const hit = this.fontCache.get(clave);
+    if (hit !== undefined) {
+      x.font = `${weight} ${hit}px ${family}`.trim();
+      return hit;
+    }
     let s = size;
     for (let i = 0; i < 14; i++) {
       x.font = `${weight} ${s}px ${family}`.trim();
       if (x.measureText(text).width <= maxW) break;
       s *= 0.9;
     }
+    if (this.fontCache.size > 60) this.fontCache.clear();
+    this.fontCache.set(clave, s);
     return s;
   }
 
@@ -233,10 +253,18 @@ export class Renderer {
     const e = clamp(p.energy / 6, 0, 1);
     x.fillStyle = 'rgba(244,239,228,0.16)';
     x.fillRect(bx + u * 2.4, barY, barW, u * 0.7);
+    const llenoX = right ? bx + u * 2.4 + barW * (1 - e) : bx + u * 2.4;
+    // ESTE shadowBlur era el unico costo que valia CERO durante la cuenta
+    // regresiva y se encendia justo al empezar a grabar: el radio es
+    // proporcional a la energia, y durante la cuenta la energia es 0 porque
+    // el scorer todavia no corre. O sea, era gratis exactamente cuando se
+    // mide el rendimiento y caro exactamente cuando se graba.
+    // Mismo truco que el esqueleto: un rectangulo mas ancho y translucido.
+    x.globalAlpha = 0.35 * e;
     x.fillStyle = color;
-    x.shadowColor = color; x.shadowBlur = u * e * 3;
-    x.fillRect(right ? bx + u * 2.4 + barW * (1 - e) : bx + u * 2.4, barY, barW * e, u * 0.7);
-    x.shadowBlur = 0;
+    x.fillRect(llenoX - u * 0.5, barY - u * 0.5, barW * e + u, u * 1.7);
+    x.globalAlpha = 1;
+    x.fillRect(llenoX, barY, barW * e, u * 0.7);
 
     // combo
     if (p.combo > 1) {
@@ -364,9 +392,39 @@ export class Renderer {
     x.restore();
   }
 
+  /**
+   * GOBERNADOR DE CALIDAD.
+   *
+   * El clip se graba a los fps a los que se DIBUJA, y perder el vsync no
+   * cuesta un poco: cuesta la mitad. Un frame que se pasa de 16.7ms cae al
+   * siguiente vsync y son 33.3ms clavados, o sea 30fps de golpe. No hay
+   * degradado suave, hay un acantilado.
+   *
+   * La resolucion no se puede tocar a mitad de grabacion (rompe el encoder),
+   * pero los efectos si. Asi que cuando no alcanza el presupuesto se sueltan
+   * efectos, del mas caro al mas barato, en vez de soltar la mitad de los
+   * cuadros. Un clip a 60fps sin grano se ve mucho mejor que uno a 30 con.
+   *
+   * Se mide con la MEDIANA de los ultimos 30 dt: un hipo suelto (un callout
+   * nuevo, una recoleccion de basura) no debe bajar la calidad de la ronda.
+   */
+  gobernar(dt) {
+    this.dts.push(dt);
+    if (this.dts.length > 30) this.dts.shift();
+    this.enNivel += dt;
+    if (this.dts.length < 30 || this.enNivel < 0.8) return;
+    const med = [...this.dts].sort((a, b) => a - b)[15];
+    if (med > 0.0195 && this.nivel < 3) {          // por debajo de ~51fps
+      this.nivel++; this.enNivel = 0; this.dts.length = 0;
+    } else if (med < 0.0172 && this.nivel > 0 && this.enNivel > 2.5) {
+      this.nivel--; this.enNivel = 0; this.dts.length = 0;   // sobra: devolver
+    }
+  }
+
   frame({ video, mirror, players, active, status, dt, stress = false }) {
     const { x, c } = this;
     this.t += dt;
+    if (!stress) this.gobernar(dt);   // durante la cuenta se mide a tope a proposito
     this.frameNo = (this.frameNo || 0) + 1;
     this.shake = Math.max(0, this.shake - dt * 2.6);
     this.flash = Math.max(0, this.flash - dt * 3.4);
@@ -375,8 +433,11 @@ export class Renderer {
     // stress: fuerza los efectos caros para medir el costo real antes de grabar.
     // La trama arranca recien en los picos: antes salia con casi cualquier
     // movimiento, o sea una pasada de pantalla completa en todos los frames.
-    const toneI = stress ? 0.9 : clamp((maxE - 2.5) / 3, 0, 1);
-    const rayI = stress ? 0.7 : clamp((maxE - 3.6) / 4, 0, 1) * 0.8 + this.flash * 0.5;
+    // nivel 1 suelta el grano, 2 tambien la trama, 3 tambien los rayos:
+    // los tres son pasadas de PANTALLA COMPLETA, que es lo unico que de
+    // verdad pesa a 60fps en un telefono.
+    const toneI = (stress ? 0.9 : clamp((maxE - 2.5) / 3, 0, 1)) * (this.nivel >= 2 ? 0 : 1);
+    const rayI = (stress ? 0.7 : clamp((maxE - 3.6) / 4, 0, 1) * 0.8 + this.flash * 0.5) * (this.nivel >= 3 ? 0 : 1);
 
     x.save();
     if (this.shake > 0.01) {
@@ -396,7 +457,7 @@ export class Renderer {
 
     // grano: un relleno de pantalla completa. Cada 2 frames alcanza para el
     // efecto y libera medio presupuesto de pixeles a 60fps.
-    if (this.frameNo % 2 === 0) {
+    if (this.frameNo % 2 === 0 && this.nivel < 1) {
       x.save(); x.globalAlpha = 0.5; x.fillStyle = this.grainPat;
       x.translate((this.t * 60) % 140 - 140, (this.t * 37) % 140 - 140);
       x.fillRect(0, 0, c.width + 140, c.height + 140); x.restore();

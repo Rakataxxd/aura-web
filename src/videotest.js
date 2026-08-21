@@ -9,6 +9,7 @@
 import { createPose } from './pose.js';
 import { Player } from './scoring.js';
 import { MoveDetector, buildCtx } from './moves.js';
+import { toMetric } from './landmarks.js';
 
 let posePromise = null;
 
@@ -58,6 +59,10 @@ export async function run(url, { numPoses = 1, maxSeconds = 60 } = {}) {
     const step = (now, meta) => {
       const t = video.currentTime;
       if (t === lastT) { schedule(); return; }
+      // dt REAL entre cuadros de video. Con 1/30 fijo, la velocidad de
+      // muñeca sale escalada y el filtro de quietud no mide lo que mide en
+      // la app: los resultados del test dejan de significar nada.
+      const dt = lastT < 0 ? 1 / 30 : Math.min(Math.max(t - lastT, 1 / 120), 0.3);
       lastT = t;
       frames++;
 
@@ -67,15 +72,19 @@ export async function run(url, { numPoses = 1, maxSeconds = 60 } = {}) {
       inferMs.push(performance.now() - t0);
 
       const lm = res?.landmarks?.[0] || null;
+      // moves.js trabaja en espacio metrico: con crudos, un video vertical y
+      // uno apaisado dan resultados distintos para la misma persona.
+      const ar = (video.videoWidth || 1) / (video.videoHeight || 1);
+      const met = toMetric(lm, ar);
       if (lm) {
         conPersona++;
-        if (!buildCtx(lm)) sinTorso++;
+        if (!buildCtx(met)) sinTorso++;
       }
 
-      player.update(lm, t);
+      player.update(lm, t, met);
       player.drain();
       energias.push(player.energy);
-      for (const m of det.feed(lm, 1 / 30)) hits.push({ t: +t.toFixed(2), move: m.name });
+      for (const m of det.feed(met, dt)) hits.push({ t: +t.toFixed(2), move: m.name });
 
       window.__vtProgreso = { fase: 'procesando', frames, t: +t.toFixed(2), conPersona, hits: hits.length };
       if (video.ended || t >= maxSeconds) { done(); return; }

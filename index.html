@@ -25,6 +25,7 @@
       <h1>ESCÁNER<br /><em>DE AURA</em></h1>
       <p class="lede">Poné la cámara. Movete 15 segundos.<br />El escáner hace el resto.</p>
       <button class="btn" id="go">ESCANEAR MI AURA</button>
+      <button class="btn ghost hidden" id="verRank">VER RANKING</button>
       <p class="fine" id="note">Tu video nunca sale de tu teléfono. Todo corre acá.</p>
     </section>
 
@@ -45,9 +46,37 @@
       <h2 id="rTitle">—</h2>
       <p class="lede" id="rSub">—</p>
       <div class="stats" id="rStats"></div>
+
+      <!-- alta al torneo: solo aparece si hay backend configurado -->
+      <div class="rank-alta hidden" id="alta">
+        <input id="alias" class="alias" maxlength="14" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" placeholder="TU NOMBRE" />
+        <button class="btn small" id="subir">ENTRAR AL TORNEO</button>
+      </div>
+      <p class="fine" id="altaMsg"></p>
+
       <button class="btn" id="share">DESCARGAR CLIP</button>
       <button class="btn ghost" id="again">OTRA VEZ</button>
       <p class="fine" id="rNote"></p>
+    </section>
+
+    <!-- RANKING -->
+    <section class="panel hidden" id="rank">
+      <div class="tape">TORNEO</div>
+      <div class="tabs" id="tabAmbito">
+        <button class="tab on" data-v="global">GLOBAL</button>
+        <button class="tab" data-v="pais">PAÍS</button>
+        <button class="tab" data-v="region">REGIÓN</button>
+      </div>
+      <div class="tabs" id="tabPeriodo">
+        <button class="tab on" data-v="dia">HOY</button>
+        <button class="tab" data-v="semana">SEMANA</button>
+        <button class="tab" data-v="historico">HISTÓRICO</button>
+      </div>
+      <p class="fine" id="rankDonde"></p>
+      <ol class="tabla" id="tabla"></ol>
+      <p class="fine" id="rankYo"></p>
+      <button class="btn ghost" id="rankVolver">VOLVER</button>
     </section>
 
     <!-- ERROR -->

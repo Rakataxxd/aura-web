@@ -1,0 +1,17 @@
+name = "aura-ranking"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# El binding se llama DB en el codigo. `database_id` sale de crear la base:
+#   npx wrangler d1 create aura-ranking
+# y se pega aca. Despues, una sola vez:
+#   npx wrangler d1 execute aura-ranking --remote --file=./schema.sql
+[[d1_databases]]
+binding = "DB"
+database_name = "aura-ranking"
+database_id = "9b4395e4-ee51-49b9-8a2b-467f50604e8f"
+
+[vars]
+# Origenes que pueden pegarle. Se compara EXACTO contra el header Origin.
+# Si publicas en otro lado, agregalo aca separado por coma.
+ORIGENES = "https://rakataxxd.github.io,http://localhost:5199,http://localhost:5173"

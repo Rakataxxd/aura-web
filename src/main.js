@@ -1,10 +1,12 @@
 import './style.css';
-import { createPose, createPoseWorker, openCamera, assignSlots, prefetchAssets } from './pose.js';
+import { createPose, createPoseWorker, openCamera, assignSlots, prefetchAssets, ajustesCamara } from './pose.js';
 import { Player } from './scoring.js';
 import { Renderer, P_COLOR, GOLD, BONE } from './render.js';
 import { Recorder, shareOrDownload } from './record.js';
-import { detectDap, DAP } from './moves.js';
+import { detectDap, DAP, brazosCortados } from './moves.js';
+import { toMetric } from './landmarks.js';
 import { verdictFor } from './roasts.js';
+import { hayApi, getAlias, setAlias, aliasValido, enviarPuntaje, traerRanking, nombrePais } from './ranking.js';
 
 const ROUND_SECONDS = 15;
 const DEBUG = new URLSearchParams(location.search).has('debug');
@@ -14,20 +16,38 @@ const $ = (id) => document.getElementById(id);
 const el = {
   video: $('cam'), canvas: $('view'),
   intro: $('intro'), loading: $('loading'), count: $('count'), result: $('result'), oops: $('oops'),
+  rank: $('rank'),
   go: $('go'), share: $('share'), again: $('again'), retry: $('retry'),
   countnum: $('countnum'), loadmsg: $('loadmsg'), oopsmsg: $('oopsmsg'),
   rScore: $('rScore'), rTitle: $('rTitle'), rSub: $('rSub'), rStats: $('rStats'), rNote: $('rNote'),
+  verRank: $('verRank'), alta: $('alta'), alias: $('alias'), subir: $('subir'), altaMsg: $('altaMsg'),
+  tabAmbito: $('tabAmbito'), tabPeriodo: $('tabPeriodo'),
+  rankDonde: $('rankDonde'), tabla: $('tabla'), rankYo: $('rankYo'), rankVolver: $('rankVolver'),
 };
 
+const PANELES = ['intro', 'loading', 'count', 'result', 'oops', 'rank'];
 const show = (...ids) => {
-  for (const k of ['intro', 'loading', 'count', 'result', 'oops']) {
-    el[k].classList.toggle('hidden', !ids.includes(k));
-  }
+  for (const k of PANELES) el[k].classList.toggle('hidden', !ids.includes(k));
 };
 
 // ---------- canvas ----------
-let downscaled = false;
+// Escalera de resolucion. Antes esto era un booleano `downscaled` y
+// `sizeCanvas()` aplicaba 0.75 fijo, sin importar que escalon se hubiera
+// elegido: un aparato que necesitaba 0.5 volvia a 0.75 al tocar "otra vez".
+// Y la decision solo corria si `!downscaled`, o sea UNA vez en la vida de la
+// pagina: ni podia bajar mas, ni devolver resolucion si sobraba.
+const ESCALAS = [1, 0.75, 0.6, 0.5];
+let escalaCanvas = 1;
 let stressFps = [];
+
+function elegirEscala(med, actual) {
+  let i = ESCALAS.indexOf(actual);
+  if (i < 0) i = 0;
+  if (med < 25) i += 2;            // lejisimos: saltar dos escalones de una
+  else if (med < 46) i += 1;
+  else if (med >= 59) i -= 1;      // sobra presupuesto: devolver resolucion
+  return ESCALAS[Math.max(0, Math.min(ESCALAS.length - 1, i))];
+}
 
 function fitCanvasCss() {
   const { width: W, height: H } = el.canvas;
@@ -38,10 +58,9 @@ function fitCanvasCss() {
 
 function sizeCanvas() {
   const portrait = window.innerHeight >= window.innerWidth;
-  let [W, H] = portrait ? [720, 1280] : [1280, 720];
-  if (downscaled) { W = Math.round(W * 0.75); H = Math.round(H * 0.75); }
-  el.canvas.width = W;
-  el.canvas.height = H;
+  const [W, H] = portrait ? [720, 1280] : [1280, 720];
+  el.canvas.width = Math.round(W * escalaCanvas / 2) * 2;
+  el.canvas.height = Math.round(H * escalaCanvas / 2) * 2;
   fitCanvasCss();
 }
 sizeCanvas();
@@ -54,9 +73,18 @@ let activeCount = 1;
 let state = 'idle';
 let raf = 0, lastVideoTime = -1, lastT = 0, roundLeft = ROUND_SECONDS, blob = null;
 let prefetch = null, prefetchPct = 0, dapCool = 0, dapHold = 0;
-let framesRonda = 0, inicioRonda = 0, fpsClip = 0;
+let framesRonda = 0, inicioRonda = 0, fpsClip = 0, deteccionesRonda = 0, fpsDeteccion = 0, nivelEfectos = 0;
+let cam = { w: 0, h: 0, fps: 0 }, motor = '?', msInf = 0, msCap = 0, medStress = 0;
+const trabajoRonda = [];
+const p95 = (a) => (a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length * 0.95)] : 0);
 let crudos = [null, null];       // ultimos landmarks reales (para el scorer)
 let ultimaDeteccion = 0;         // segundos, para el dt real entre detecciones
+let brazosFuera = false;         // los brazos no entran en el encuadre
+let bombeando = false;           // hay un lazo de requestVideoFrameCallback vivo
+let genBombeo = 0;
+let proximaDeteccion = 0;        // ciclo de trabajo del respaldo de hilo principal
+let lienzoChico = null, lienzoChicoCtx = null;
+const msInferencia = [];
 const mirror = true;   // camara frontal: espejo, si no se siente al reves
 
 // Suavizado exponencial de landmarks solo para el render.
@@ -80,6 +108,7 @@ function smoothLm(slot, target, dt) {
 function fail(msg) {
   state = 'idle';
   cancelAnimationFrame(raf);
+  pararDeteccion();
   el.oopsmsg.textContent = msg;
   show('oops');
 }
@@ -93,19 +122,27 @@ function onLandmarks(landmarks, tsMs) {
   const t = tsMs / 1000;
   const dt = ultimaDeteccion ? Math.min(t - ultimaDeteccion, 0.3) : 1 / 30;
   ultimaDeteccion = t;
+  deteccionesRonda++;
 
   crudos = landmarks?.length ? assignSlots(landmarks) : [null, null];
   if (landmarks?.length) activeCount = landmarks.length >= 2 ? 2 : 1;
 
+  // Relacion de aspecto REAL del cuadro que vio el detector. Sin esto, la
+  // misma pose da numeros que difieren 3.2x entre telefono parado y
+  // acostado, y los umbrales de moves.js dejan de significar nada.
+  const ar = (el.video.videoWidth || 1) / (el.video.videoHeight || 1);
+  const metricos = crudos.map((lm) => toMetric(lm, ar));
+  brazosFuera = brazosCortados(metricos[0]);
+
   if (state !== 'running') return;
 
-  players.forEach((p, i) => p.update(crudos[i], t));
+  players.forEach((p, i) => p.update(crudos[i], t, metricos[i]));
 
   // DAP: no es de un jugador, es del par. Se sostiene: con un solo frame
   // coincidente cualquier mano que pasara cerca de la otra contaba.
   if (activeCount === 2) {
     dapCool -= dt;
-    dapHold = detectDap(crudos[0], crudos[1]) ? dapHold + dt : 0;
+    dapHold = detectDap(metricos[0], metricos[1]) ? dapHold + dt : 0;
     if (dapCool <= 0 && dapHold >= 0.2) {
       dapCool = DAP.cd; dapHold = 0;
       players.forEach((p) => { p.aura += DAP.bonus; p.landed.push(DAP.name); });
@@ -120,6 +157,9 @@ function onLandmarks(landmarks, tsMs) {
 function pedirDeteccion() {
   const v = el.video;
   if (v.readyState < 2) return;
+  // El worker se sirve solo del track: no hay nada que empujar y el hilo
+  // principal no toca ni un pixel. Es lo que libera el presupuesto de 60fps.
+  if (poseWorker?.autoAlimentado()) return;
   // Solo frames NUEVOS de camara. Mandar el mismo frame otra vez gasta un
   // createImageBitmap y hace que el worker repita inferencia sobre lo mismo.
   if (v.currentTime === lastVideoTime) return;
@@ -130,12 +170,76 @@ function pedirDeteccion() {
     }
     return;
   }
-  // respaldo: hilo principal (bloquea, capa a ~30fps, pero funciona)
+  // --- respaldo: hilo principal ---
+  //
+  // detectForVideo BLOQUEA. Cada llamada se come el presupuesto del frame
+  // entero y el clip se graba a lo que quede. Medido en un iPhone 15 Pro
+  // Max: 13 FPS de clip con 7 detecciones/s, o sea la inferencia comiendose
+  // todo. Dos frenos:
+  //   1. Se detecta sobre una copia CHICA, no sobre el video de 1080p. El
+  //      modelo trabaja a 256px igual.
+  //   2. Ciclo de trabajo: despues de una inferencia de T ms se esperan
+  //      T*1.4 antes de la siguiente. La deteccion baja un poco; el dibujo,
+  //      que es LO QUE SE GRABA, recupera la mayor parte del presupuesto.
+  if (performance.now() < proximaDeteccion) return;
   lastVideoTime = v.currentTime;
   try {
-    const res = pose.detectForVideo(v, performance.now());
+    const t0 = performance.now();
+    const res = pose.detectForVideo(reducirFrame(v), t0);
+    const costo = performance.now() - t0;
+    msInferencia.push(costo);
+    if (msInferencia.length > 60) msInferencia.shift();
+    // Cuanto respiro darle al dibujo depende de si le esta sobrando. Si el
+    // gobernador no tuvo que soltar ni un efecto, hay margen y conviene
+    // detectar mas seguido; si ya esta soltando, el clip manda.
+    proximaDeteccion = performance.now() + costo * ((renderer?.nivel ?? 0) === 0 ? 0.8 : 1.8);
     onLandmarks(res?.landmarks ?? [], performance.now());
   } catch (e) { console.warn('[pose]', e?.message); }
+}
+
+/** Copia reducida del frame de camara, para no inferir sobre 1080p. */
+function reducirFrame(v) {
+  const w = v.videoWidth, h = v.videoHeight;
+  if (!w || Math.max(w, h) <= 640) return v;
+  const s = 640 / Math.max(w, h);
+  const W = Math.round(w * s), H = Math.round(h * s);
+  if (!lienzoChico) lienzoChico = document.createElement('canvas');
+  if (lienzoChico.width !== W || lienzoChico.height !== H) {
+    lienzoChico.width = W; lienzoChico.height = H;
+    lienzoChicoCtx = lienzoChico.getContext('2d', { alpha: false });
+  }
+  lienzoChicoCtx.drawImage(v, 0, 0, W, H);
+  return lienzoChico;
+}
+
+/**
+ * Lazo de deteccion, SEPARADO del de render.
+ *
+ * Antes la deteccion vivia dentro del requestAnimationFrame: cada frame de
+ * dibujo pagaba tambien el costo de conseguir un cuadro de camara, y el que
+ * se pasaba de 16.7ms caia al siguiente vsync -> 30fps clavados en el clip.
+ * requestVideoFrameCallback dispara UNA vez por cuadro nuevo de camara, que
+ * es exactamente cuando hay algo nuevo que detectar, y nunca mas.
+ */
+function bombearDeteccion() {
+  const v = el.video;
+  if (bombeando || !('requestVideoFrameCallback' in v)) return;
+  bombeando = true;
+  // Al reiniciar la ronda se abre una camara nueva. La generacion mata al
+  // lazo viejo si le quedaba un callback pendiente, para no terminar con dos
+  // bombeos compitiendo por el mismo worker.
+  const mio = ++genBombeo;
+  const paso = () => {
+    if (mio !== genBombeo) return;
+    pedirDeteccion();
+    v.requestVideoFrameCallback(paso);
+  };
+  v.requestVideoFrameCallback(paso);
+}
+
+function pararDeteccion() {
+  genBombeo++;
+  bombeando = false;
 }
 
 async function boot() {
@@ -165,6 +269,11 @@ async function boot() {
       if (!poseWorker) pose = await createPose(2);
       console.info(poseWorker ? `[pose] worker (${poseWorker.delegate})` : '[pose] hilo principal');
     }
+    // ?sinstream fuerza el camino de createImageBitmap, para comparar
+    if (poseWorker && !new URLSearchParams(location.search).has('sinstream')) {
+      console.info('[pose] stream directo al worker:', poseWorker.conectarStream(stream));
+    }
+    bombearDeteccion();
     if (document.fonts?.ready) await document.fonts.ready;
   } catch (e) {
     console.error(e);
@@ -179,11 +288,18 @@ function countdown() {
   players = [new Player(0), new Player(1)];
   roundLeft = ROUND_SECONDS;
   stressFps = [];
+  trabajoRonda.length = 0;
   ultimaDeteccion = 0;
   dapCool = 0;
   state = 'countdown';
   lastT = performance.now() / 1000;
   loop();
+
+  // Ensayo: se graba en falso durante la cuenta y se tira. Sin esto la
+  // prueba de esfuerzo medía un frame SIN capturar el canvas, que es
+  // justamente lo que se pone caro al grabar.
+  const ensayo = new Recorder(el.canvas);
+  ensayo.start(60);
 
   let n = 3;
   show('count');
@@ -193,27 +309,40 @@ function countdown() {
     if (n === 0) {
       clearInterval(tick);
       show();
+      ensayo.cancelar();      // suelta la captura antes de tocar el canvas
       // Si el aparato no aguanto la prueba de esfuerzo de la cuenta regresiva,
       // bajamos resolucion ANTES de grabar. Cambiarla a mitad de grabacion
       // rompe el encoder, por eso la decision se toma aca.
-      if (!downscaled && stressFps.length > 20) {
-        const avg = stressFps.reduce((a, b) => a + b, 0) / stressFps.length;
+      // Se re-evalua en CADA ronda: la carga cambia entre rondas (calor,
+      // bateria, otra app) y antes esto corria una sola vez por carga de
+      // pagina, asi que ni podia bajar mas ni devolver resolucion.
+      if (stressFps.length > 20) {
+        // MEDIANA, no promedio.
+        //
+        // El primer frame del bucle mide un dt de microsegundos (countdown()
+        // fija lastT y llama a loop() en el mismo tick), o sea ~10000 fps.
+        // Ese unico valor levantaba el promedio de ~45 a ~176 y la decision
+        // salia SIEMPRE "escala 1". Toda la bajada automatica de resolucion
+        // estaba muerta desde que se escribio: un aparato que dibujaba a
+        // 45fps se quedaba igual en 720x1280.
+        const orden = [...stressFps].sort((a, b) => a - b);
+        const med = orden[orden.length >> 1];
         // Escalonado: si el aparato no llega a 60fps, lo que arruina el clip
         // es la resolucion, no los efectos. Mejor 540p a 60fps que 720p a 30.
-        const escala = avg >= 52 ? 1 : (avg >= 40 ? 0.75 : 0.6);
-        if (escala < 1) {
-          downscaled = true;
-          const portrait = el.canvas.height >= el.canvas.width;
-          const [W, H] = portrait ? [720, 1280] : [1280, 720];
-          el.canvas.width = Math.round(W * escala / 2) * 2;
-          el.canvas.height = Math.round(H * escala / 2) * 2;
-          fitCanvasCss();
+        medStress = med;
+        // La medicion vale PARA LA ESCALA CON LA QUE SE MIDIO: se mueve un
+        // escalon (dos si esta lejisimos), no se salta a un absoluto.
+        const escala = elegirEscala(med, escalaCanvas);
+        if (escala !== escalaCanvas) {
+          escalaCanvas = escala;
+          sizeCanvas();
           renderer = new Renderer(el.canvas);
-          console.info(`[perf] ${avg.toFixed(0)} FPS en la prueba -> ${el.canvas.width}x${el.canvas.height}`);
+          console.info(`[perf] ${med.toFixed(0)} FPS en la prueba -> ${el.canvas.width}x${el.canvas.height}`);
         }
       }
       state = 'running';
       framesRonda = 0;
+      deteccionesRonda = 0;
       inicioRonda = performance.now();
       recorder.start(60);
       return;
@@ -239,13 +368,18 @@ function handleEvents(p, slot) {
 
 function loop() {
   raf = requestAnimationFrame(loop);
-  const trabajo0 = DEBUG ? performance.now() : 0;
+  // Siempre, no solo en debug: es DOS performance.now() y es el unico numero
+  // que separa "el hilo principal esta ahogado" de "el cuello esta afuera"
+  // (compositor, encoder, GPU). Sin el, un reporte de pocos fps no se puede
+  // diagnosticar.
+  const trabajo0 = performance.now();
   const now = performance.now();
   const t = now / 1000;
   const dt = Math.min(t - lastT, 0.15);
   lastT = t;
 
-  pedirDeteccion();
+  // Solo si no hay rVFC (Firefox): ahi el render sigue siendo el unico reloj.
+  if (!bombeando) pedirDeteccion();
 
   const scoring = state === 'running';
   // El scorer ya consumio los landmarks crudos en onLandmarks(). Aca solo
@@ -272,12 +406,16 @@ function loop() {
     window.__estado = state;
   }
   const fpsTag = DEBUG
-    ? `  ·  ${(fpsHist.reduce((a, b) => a + b, 0) / fpsHist.length).toFixed(0)} FPS  ${el.canvas.width}p`
+    ? `  ·  ${(fpsHist.reduce((a, b) => a + b, 0) / fpsHist.length).toFixed(0)} FPS  ${el.canvas.width}p  N${renderer.nivel}`
     : '';
 
+  // Con el telefono vertical el cuadro mide media altura de ancho: los brazos
+  // abiertos se salen y el t-pose no tiene con que detectarse. Decirlo es la
+  // diferencia entre "no funciona" y "alejate un paso".
+  const aviso = brazosFuera && crudos[0] ? '  ·  ALEJÁTE, NO VEO TUS BRAZOS' : '';
   const status = (state === 'running'
-    ? `${roundLeft.toFixed(1)}s  ·  ${activeCount === 2 ? 'MODO VERSUS' : 'SUJETO ÚNICO'}`
-    : (crudos[0] ? 'SUJETO DETECTADO' : 'BUSCANDO SUJETO…')) + fpsTag;
+    ? `${roundLeft.toFixed(1)}s  ·  ${activeCount === 2 ? 'MODO VERSUS' : 'SUJETO ÚNICO'}${aviso}`
+    : (crudos[0] ? `SUJETO DETECTADO${aviso}` : 'BUSCANDO SUJETO…')) + fpsTag;
 
   renderer.frame({
     video: el.video, mirror, players, active: activeCount, status, dt,
@@ -286,6 +424,12 @@ function loop() {
 
   // Trabajo de hilo principal por frame: si pasa de 16.7ms, 60fps es
   // imposible porque rAF cae al siguiente vsync (33.3ms = 30fps clavados).
+  // Si NO pasa de 16.7 y los fps igual estan por el piso, el cuello esta
+  // fuera del hilo principal y no hay efecto que soltar que lo arregle.
+  if (scoring) {
+    trabajoRonda.push(performance.now() - trabajo0);
+    if (trabajoRonda.length > 400) trabajoRonda.shift();
+  }
   if (DEBUG) {
     (window.__trabajo ||= []).push(performance.now() - trabajo0);
     if (window.__trabajo.length > 240) window.__trabajo.shift();
@@ -298,9 +442,23 @@ async function finish() {
   // se redibuja, asi que este es el numero que de verdad tiene el archivo.
   // captureStream(60) es el techo: el clip nunca puede tener mas de 60,
   // aunque el bucle dibuje mas rapido.
-  fpsClip = Math.min(60, framesRonda / Math.max((performance.now() - inicioRonda) / 1000, 0.001));
+  const segundos = Math.max((performance.now() - inicioRonda) / 1000, 0.001);
+  fpsClip = Math.min(60, framesRonda / segundos);
+  fpsDeteccion = deteccionesRonda / segundos;
+  cam = ajustesCamara(stream);       // antes de cerrar el track, despues no se sabe
+  nivelEfectos = renderer?.nivel ?? 0;
+  // El motor es LO PRIMERO que hay que saber cuando alguien reporta pocos
+  // fps: "hilo principal" significa que la inferencia esta bloqueando el
+  // dibujo y no hay ajuste de efectos que lo salve.
+  motor = poseWorker ? `worker ${poseWorker.delegate}` : 'HILO PRINCIPAL';
+  const inf = poseWorker
+    ? poseWorker.inferenciaMs()
+    : (msInferencia.length ? [...msInferencia].sort((a, b) => a - b)[msInferencia.length >> 1] : 0);
+  msInf = Math.round(inf);
+  msCap = Math.round(poseWorker?.capturaMs?.() ?? 0);
   blob = await recorder.stop();
   cancelAnimationFrame(raf);
+  pararDeteccion();
   stream?.getTracks().forEach((t) => t.stop());
   state = 'idle';
 
@@ -319,12 +477,33 @@ async function finish() {
     `PICO <b>${p.peakEnergy.toFixed(1)}</b>`,
     `COMBO MÁX <b>${p.combo}</b>`,
     activeCount === 2 ? `GANADOR <b>P${winner + 1}</b>` : `MODO <b>SOLO</b>`,
+    // Visible siempre, no solo en debug: es el numero que hay que poder
+    // mirar cuando el clip "no sale a 60".
+    `CLIP <b>${fpsClip.toFixed(0)} FPS · ${el.canvas.height}p</b>`,
     ...landed.map((n) => `<b>${n}</b>`),
-    ...(DEBUG ? [`CLIP <b>${fpsClip.toFixed(0)} FPS · ${el.canvas.width}×${el.canvas.height}</b>`] : []),
+    ...(DEBUG ? [
+      // TRABAJO es el que decide dónde está el cuello:
+      //   alto  -> el hilo principal está ahogado (JS/dibujo)
+      //   bajo con pocos FPS -> el cuello está afuera (captura/encoder/GPU)
+      `TRABAJO <b>${p95(trabajoRonda).toFixed(1)} ms</b>`,
+      `CUENTA <b>${medStress.toFixed(0)} fps</b>`,
+      `MOTOR <b>${motor}</b>`,
+      `INFERENCIA <b>${msInf} ms</b>`,
+      `CAPTURA <b>${msCap} ms</b>`,
+      `DETECCIÓN <b>${fpsDeteccion.toFixed(0)}/s</b>`,
+      `CÁMARA <b>${cam.w}×${cam.h} @${cam.fps}</b>`,
+      `EFECTOS <b>nivel ${nivelEfectos}</b>`,
+    ] : []),
   ].map((s) => `<span>${s}</span>`).join('');
   el.rSub.textContent = landed.length
     ? `${v.s}  Reconocí: ${landed.join(', ')}.`
     : `${v.s} No detecté ningún movimiento con nombre.`;
+
+  // Lo que se sube al torneo. Se guarda al cerrar la ronda y no se recalcula
+  // despues: `players` se reinicia en "otra vez" y el alias se puede escribir
+  // en cualquier momento, incluso con otra ronda ya empezando.
+  ultimaPartida = { aura, moves: landed };
+  prepararAlta();
 
   if (blob) {
     el.share.classList.remove('hidden');
@@ -337,6 +516,107 @@ async function finish() {
   }
   show('result');
 }
+
+// ---------- torneo ----------
+let ultimaPartida = null;     // {aura, moves} de la ronda recien cerrada
+let subida = null;            // respuesta del worker: {pais, region}
+let ambito = 'global', periodo = 'dia';
+
+function prepararAlta() {
+  el.alta.classList.toggle('hidden', !hayApi());
+  if (!hayApi()) return;
+  el.alias.value = getAlias();
+  el.subir.disabled = false;
+  el.subir.textContent = 'ENTRAR AL TORNEO';
+  el.altaMsg.textContent = '';
+}
+
+el.subir?.addEventListener('click', async () => {
+  const alias = el.alias.value.trim();
+  if (!aliasValido(alias)) {
+    el.altaMsg.textContent = 'El nombre va de 2 a 14 letras o números.';
+    el.alias.focus();
+    return;
+  }
+  if (!ultimaPartida) return;
+  setAlias(alias);
+  el.subir.disabled = true;
+  el.subir.textContent = 'SUBIENDO…';
+  try {
+    subida = await enviarPuntaje({ alias, ...ultimaPartida });
+    el.altaMsg.textContent = 'Anotado. Abriendo la tabla…';
+    // El ambito arranca en el mas chico que tenga sentido: verse primero
+    // entre los del barrio engancha mas que ser el puesto 4.000 del mundo.
+    ambito = subida.region ? 'region' : 'pais';
+    periodo = 'dia';
+    abrirRanking();
+  } catch (e) {
+    el.subir.disabled = false;
+    el.subir.textContent = 'REINTENTAR';
+    el.altaMsg.textContent = `No se pudo subir (${e.message}). Tu puntaje no se perdió, probá de nuevo.`;
+  }
+});
+
+/** Las pestañas de ambito dependen de si el worker supo de donde jugás. */
+function sincronizarTabs() {
+  for (const b of el.tabAmbito.querySelectorAll('.tab')) {
+    b.classList.toggle('on', b.dataset.v === ambito);
+    if (b.dataset.v === 'region') b.disabled = !!subida && !subida.region;
+  }
+  for (const b of el.tabPeriodo.querySelectorAll('.tab')) {
+    b.classList.toggle('on', b.dataset.v === periodo);
+  }
+}
+
+const PERIODO_TXT = { dia: 'HOY', semana: 'ESTA SEMANA', historico: 'DESDE SIEMPRE' };
+
+async function abrirRanking() {
+  show('rank');
+  sincronizarTabs();
+  el.rankYo.textContent = '';
+  el.tabla.innerHTML = '<li><span class="vacio">CARGANDO…</span></li>';
+  const alias = getAlias();
+  try {
+    const r = await traerRanking({ ambito, periodo, alias, limite: 50 });
+    const donde = ambito === 'global' ? 'EL MUNDO'
+      : ambito === 'pais' ? nombrePais(r.pais)
+        : (r.region || nombrePais(r.pais)).toUpperCase();
+    el.rankDonde.textContent = `${donde} · ${PERIODO_TXT[periodo]}`;
+    // Se compara por la clave normalizada, igual que agrupa el worker: si no,
+    // "Rakata" no se resaltaria por haberse anotado antes como "RAKATA".
+    const clave = (s) => String(s).trim().toLowerCase();
+    el.tabla.innerHTML = r.filas.length
+      ? r.filas.map((f) => `<li class="${f.puesto <= 3 ? 'podio ' : ''}${clave(f.alias) === clave(alias) ? 'yo' : ''}">
+          <span class="pos">${f.puesto}</span>
+          <span class="quien">${escapar(f.alias)}</span>
+          <span class="cuanto">${Number(f.aura).toLocaleString('es-GT')}</span>
+        </li>`).join('')
+      : '<li><span class="vacio">TODAVÍA NO JUGÓ NADIE ACÁ.<br />ANOTATE PRIMERO.</span></li>';
+    el.rankYo.textContent = r.yo
+      ? `Vos: puesto ${r.yo.puesto} de ${r.yo.total} · ${Number(r.yo.aura).toLocaleString('es-GT')} de aura.`
+      : (alias ? 'Todavía no tenés puntaje en esta tabla.' : '');
+  } catch (e) {
+    el.tabla.innerHTML = `<li><span class="vacio">NO SE PUDO CARGAR<br />${escapar(e.message)}</span></li>`;
+    el.rankDonde.textContent = '';
+  }
+}
+
+// El alias lo escribe el jugador: va al DOM como texto, nunca como HTML.
+const escapar = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+for (const [caja, set] of [[el.tabAmbito, (v) => (ambito = v)], [el.tabPeriodo, (v) => (periodo = v)]]) {
+  caja?.addEventListener('click', (ev) => {
+    const b = ev.target.closest('.tab');
+    if (!b || b.disabled) return;
+    set(b.dataset.v);
+    abrirRanking();
+  });
+}
+
+el.verRank?.addEventListener('click', abrirRanking);
+el.rankVolver?.addEventListener('click', () => show(ultimaPartida ? 'result' : 'intro'));
+if (hayApi()) el.verRank?.classList.remove('hidden');
 
 // Arranca la descarga apenas se ve el intro: para cuando toquen el boton,
 // los 8MB ya estan (o van a medias) y el arranque se siente instantaneo.
@@ -359,6 +639,10 @@ el.again.addEventListener('click', async () => {
   sizeCanvas();
   show('loading');
   try { stream = await openCamera(el.video); } catch { return fail('Se perdió la cámara.'); }
+  // Camara nueva = track nuevo: el clon que tenia el worker quedo muerto y
+  // sin esto la ronda 2 se detectaba por el camino lento.
+  poseWorker?.conectarStream(stream);
+  bombearDeteccion();
   renderer = new Renderer(el.canvas);
   recorder = new Recorder(el.canvas);
   countdown();

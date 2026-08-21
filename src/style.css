@@ -176,6 +176,72 @@ h2 {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---------- torneo ---------- */
+.btn.small { padding: 12px 18px; font-size: 15px; box-shadow: 5px 5px 0 var(--magenta); }
+
+.rank-alta { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; justify-content: center; }
+
+.alias {
+  font-family: "Chakra Petch", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 12px 14px;
+  width: min(46vw, 180px);
+  color: var(--bone);
+  background: rgba(244, 239, 228, .06);
+  border: 2px solid rgba(244, 239, 228, .28);
+  border-radius: 0;
+  outline: none;
+}
+.alias:focus { border-color: var(--acid); }
+.alias::placeholder { color: rgba(244, 239, 228, .35); letter-spacing: .1em; }
+
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.tab {
+  font-family: "Share Tech Mono", monospace;
+  font-size: 12px;
+  letter-spacing: .08em;
+  padding: 7px 11px;
+  color: var(--bone);
+  background: transparent;
+  border: 1px solid rgba(244, 239, 228, .22);
+  cursor: pointer;
+}
+.tab.on { background: var(--acid); color: var(--ink); border-color: var(--acid); }
+.tab:disabled { opacity: .3; cursor: not-allowed; }
+
+/* La tabla scrollea SOLA. Con el panel entero scrolleando, en un telefono
+   bajo se perdian de vista las pestañas y el boton de volver. */
+.tabla {
+  list-style: none;
+  width: min(100%, 420px);
+  max-height: min(46vh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border-top: 1px solid rgba(244, 239, 228, .14);
+  border-bottom: 1px solid rgba(244, 239, 228, .14);
+}
+.tabla li {
+  display: grid;
+  grid-template-columns: 2.4em 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 9px 4px;
+  font-family: "Share Tech Mono", monospace;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(244, 239, 228, .07);
+}
+.tabla li:last-child { border-bottom: 0; }
+.tabla .pos { color: var(--acid); text-align: right; }
+.tabla .quien { font-family: "Chakra Petch", system-ui, sans-serif; font-weight: 700; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabla .cuanto { font-variant-numeric: tabular-nums; }
+.tabla li.yo { background: rgba(201, 255, 46, .12); }
+.tabla li.podio .pos { color: var(--gold); font-size: 15px; }
+.tabla .vacio { display: block; text-align: center; opacity: .5; padding: 18px 0; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
