@@ -225,14 +225,30 @@ export async function createPose(numPoses = 2) {
   }
 }
 
+/** Tosco a proposito: solo separa "telefono" de "computadora". */
+const enMovil = () => {
+  try { return matchMedia('(hover: none) and (pointer: coarse)').matches; } catch { return false; }
+};
+
 export async function openCamera(video, facing = 'user') {
+  // EN TELEFONO SE PIDEN 30 FPS, NO 60.
+  //
+  // Es la misma decision que ya estaba escrita mas abajo —resolucion antes que
+  // framerate— pero aplicada donde importa: pedir 60 hace justo lo que no se
+  // quiere, porque muchas camaras de telefono solo llegan a 60 BAJANDO la
+  // resolucion, y menos resolucion arruina los landmarks. Encima duplica el
+  // trabajo de toda la tuberia (captura, decodificacion del <video>, y los
+  // VideoFrame que el worker tiene que abrir y cerrar uno por uno) a cambio de
+  // nada: el clip se graba a los fps del CANVAS, no a los de la camara.
+  // En una computadora no cuesta nada, asi que ahi se siguen pidiendo 60.
+  const fps = enMovil() ? { ideal: 30, max: 30 } : { ideal: 60 };
   const ideal = {
     facingMode: { ideal: facing },
     width: { ideal: 1280 },
     height: { ideal: 720 },
     // solo 'ideal': 'min' es restriccion dura y una camara que no la
     // cumpla tira error en vez de negociar. Nunca uses min aca.
-    frameRate: { ideal: 60 },
+    frameRate: fps,
   };
   let stream;
   try {

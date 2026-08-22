@@ -254,59 +254,166 @@ h2 {
 .tabla li.podio .pos { color: var(--gold); font-size: 15px; }
 .tabla .vacio { display: block; text-align: center; opacity: .5; padding: 18px 0; }
 
-/* ---------- batalla online ---------- */
-.codigo {
-  font-family: "Share Tech Mono", monospace;
-  font-size: clamp(44px, 14vw, 76px);
-  letter-spacing: .22em;
-  color: var(--acid);
-  text-shadow: 4px 0 var(--magenta), -4px 0 #00e5ff;
-  padding-left: .22em;   /* compensa el tracking del ultimo caracter */
+/* ---------- batalla online: la grilla ---------- */
+/*
+ * Un recuadro por persona, tipo videollamada. El tamaño de los recuadros lo
+ * calcula acomodarTiles() en JS y llega por --tw/--th: en CSS puro no se
+ * puede elegir "2 columnas o 3" segun cual deje los recuadros mas GRANDES,
+ * que es justamente la decision (3 personas en pantalla ancha entran mejor
+ * 2+1 que 3 en fila).
+ *
+ * El ultimo renglon queda centrado solo, por el justify-content: es lo que da
+ * el 2 arriba + 1 abajo al medio de cualquier videollamada.
+ */
+#tiles {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: var(--tgap, 0px);
+}
+/* Adentro de una sala se despeja lugar para la barra. Es `inset` y no
+   `padding` porque asi clientWidth/clientHeight YA son la caja util y el
+   calculo de la grilla no tiene que andar restando bordes. El `bottom` real
+   lo pone el JS midiendo la barra, que puede ocupar dos renglones. */
+#tiles.sala { inset: 10px; --tgap: 8px; }
+
+.tile {
+  position: relative;
+  width: var(--tw, 100%);
+  height: var(--th, 100%);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+#tiles.sala .tile { border: 2px solid rgba(244, 239, 228, .16); background: #0c0c10; }
+#tiles.sala .tile.yo { border-color: var(--acid); }
+/* Los recuadros ajenos NO van espejados, aunque el propio si.
+   Verse a uno mismo al reves se siente mal —uno se ve en un espejo toda la
+   vida—, pero al de enfrente hay que verlo como es: espejado, cualquier
+   texto en su remera o atras suyo se lee al reves. Cuando el rival era un
+   recuadro de 150px no se notaba; a media pantalla, canta. */
+.tile > video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
 }
 
-/* La cara del rival vive sobre el canvas, no adentro.
-   Abajo a la derecha y no arriba: arriba estan el titulo y el cronometro de
-   la ronda, y el recuadro los tapaba justo cuando hay que mirarlos. */
-.rival {
+.tile-nombre, .tile-aura {
   position: absolute;
-  right: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom));
-  width: min(30vw, 150px);
-  z-index: 5;
-  border: 2px solid var(--acid);
-  background: #000;
-  box-shadow: 4px 4px 0 var(--magenta);
+  bottom: 6px;
+  max-width: 62%;
+  padding: 3px 7px;
+  font-size: 12px;
+  letter-spacing: .04em;
+  background: rgba(10, 10, 12, .74);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
 }
-.rival video {
-  display: block;
-  width: 100%;
-  aspect-ratio: 3 / 4;
-  object-fit: cover;
-  transform: scaleX(-1);      /* espejo, igual que la camara propia */
-  background: #000;
-}
-.rival-aura {
+.tile-nombre { left: 6px; font-weight: 700; }
+.tile-aura {
+  right: 6px;
   font-family: "Share Tech Mono", monospace;
-  font-size: 13px;
+  color: var(--acid);
+  font-variant-numeric: tabular-nums;
+}
+.tile.mudo .tile-nombre::before { content: "🔇 "; }
+#tiles.solo .tile-nombre, #tiles.solo .tile-aura { display: none; }
+
+/* ---------- batalla online: el lobby ---------- */
+.lobby {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--barra-h, 72px) + 10px);
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: min(92vw, 460px);
+  padding: 16px 22px;
   text-align: center;
-  padding: 3px 0;
-  background: rgba(10, 10, 12, .85);
-  border-top: 1px solid rgba(201, 255, 46, .3);
+  background: rgba(10, 10, 12, .88);
+  border: 2px solid rgba(201, 255, 46, .35);
 }
-.rival-aura b { color: var(--acid); font-weight: 400; font-variant-numeric: tabular-nums; }
-.rival-saltar {
-  display: block;
-  width: 100%;
+.lobby-cod {
   font-family: "Share Tech Mono", monospace;
-  font-size: 11px;
-  letter-spacing: .1em;
-  padding: 5px 0;
-  color: var(--bone);
-  background: rgba(255, 45, 111, .85);
+  font-size: clamp(30px, 8vw, 52px);
+  letter-spacing: .22em;
+  padding: 0 0 0 .22em;   /* compensa el tracking del ultimo caracter */
+  color: var(--acid);
+  text-shadow: 3px 0 var(--magenta), -3px 0 #00e5ff;
+  background: none;
   border: 0;
   cursor: pointer;
 }
-.rival-saltar:hover { background: var(--magenta); }
+.lobby-quienes {
+  font-family: "Share Tech Mono", monospace;
+  font-size: 12px;
+  letter-spacing: .06em;
+  opacity: .8;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.lobby .fine { margin: 0; }
+
+.marcador {
+  font-family: "Share Tech Mono", monospace;
+  font-size: 15px;
+  letter-spacing: .14em;
+  color: var(--gold);
+}
+
+/* ---------- batalla online: la barra ---------- */
+.barra {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  padding: 10px 12px var(--pad);
+  background: linear-gradient(to top, rgba(10, 10, 12, .96) 45%, rgba(10, 10, 12, 0));
+}
+.chip {
+  font-family: "Share Tech Mono", monospace;
+  font-size: 12px;
+  letter-spacing: .1em;
+  padding: 9px 13px;
+  color: var(--bone);
+  background: rgba(244, 239, 228, .09);
+  border: 1px solid rgba(244, 239, 228, .24);
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--acid); color: var(--acid); }
+.chip:disabled { opacity: .35; cursor: not-allowed; }
+.chip.fuerte, .chip.on { background: var(--acid); color: var(--ink); border-color: var(--acid); font-weight: 700; }
+.chip.fuerte:hover, .chip.on:hover { color: var(--ink); }
+.chip.rojo:hover { border-color: var(--magenta); color: var(--magenta); }
+
+/* La tabla de la sala en el resultado es corta: son seis como mucho. */
+.tabla.sala { max-height: min(30vh, 230px); }
+
+/* ---------- teléfonos ---------- */
+/*
+ * `backdrop-filter` es una de las cosas mas caras que se le pueden pedir a la
+ * GPU de un telefono: obliga a copiar y desenfocar TODO lo que hay detras del
+ * panel, y detras hay un canvas que se esta redibujando. Con el fondo al 93%
+ * de opacidad el desenfoque practicamente no se ve, asi que en movil se paga
+ * carisimo por nada. Se sube la opacidad y se saca el filtro.
+ */
+@media (pointer: coarse), (max-width: 760px) {
+  .panel { backdrop-filter: none; background: rgba(10, 10, 12, .97); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

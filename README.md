@@ -184,30 +184,70 @@ await m.run(15, { versus: true, live: false, stopFrac: 0.5, poster: true })
 
 `poster: true` fuerza el peor caso visual (nombre largo + crítico + frase a la vez) para verificar que nada se desborde en pantalla angosta.
 
-## Batalla online (rival al azar o sala con código)
+## Batalla online (rival al azar o sala de hasta 6)
 
-Uno contra uno, 15 segundos, gana el que junte más aura. Dos formas de entrar: **BUSCAR RIVAL** te mete en una cola con desconocidos, o **CREAR SALA** te da un código de 4 caracteres para dictarle a un amigo. El alfabeto de los códigos no tiene `O`, `0`, `I` ni `1`, justamente porque se dictan por teléfono.
+15 segundos, gana el que junte más aura. Dos formas de entrar:
+
+- **BUSCAR RIVAL** te mete en una cola con desconocidos y arma un **duelo al mejor de tres** que arranca solo.
+- **CREAR SALA** te da un código de 4 caracteres para dictarle a quien quieras: ahí entran **hasta 6** y la ronda la larga el anfitrión desde el lobby. El alfabeto de los códigos no tiene `O`, `0`, `I` ni `1`, justamente porque se dictan por teléfono.
+
+Se ve como una videollamada: un recuadro por persona, el propio siempre primero (a la izquierda en pantalla ancha, arriba en un teléfono parado). El **micrófono arranca apagado** y se prende desde la barra.
+
+### El lobby flota, no tapa
+
+El lobby de espera va **encima** de la grilla y no como panel a pantalla completa: media gracia de una sala es ver quién va cayendo mientras esperás, y un panel opaco encima convierte eso en una pantalla de carga. Muestra el código en grande (tocalo y se copia), quiénes están, y el botón de empezar —solo para el anfitrión, deshabilitado con "FALTA GENTE" mientras estés solo—. Desaparece durante la ronda y vuelve al terminar.
+
+### El duelo al mejor de tres
+
+La cola al azar no es una ronda suelta: gana el **primero que se lleva dos rondas**, y si eso pasa en la segunda no se juega la tercera. Entre rondas hay cinco segundos para leer el resultado y la siguiente arranca sola.
+
+**El marcador no viaja por la red.** Cada lado lo calcula con los mismos dos números que ya tiene (mi aura y la del otro), así que no hay ningún mensaje de marcador que se pueda perder o desincronizar: si los dos vieron las mismas rondas, los dos llegan al mismo resultado. Un empate no da punto a nadie.
+
+Ojo con el arranque automático: solo la **primera** ronda del duelo arranca sola. Sin ese candado, cualquier cosa que moviera la lista de gente —alguien prendiendo el micrófono, sin ir más lejos— largaba una ronda encima del resultado que estabas leyendo.
 
 ### Dos canales, a propósito
 
 | qué | por dónde | por qué |
 |---|---|---|
-| estado del juego (listos, arranca, aura en vivo, resultado) | WebSocket contra un Durable Object | barato, confiable, ordenado |
-| video del rival | WebRTC peer to peer | mandar video por un Worker costaría plata y sumaría un salto de latencia por cuadro |
+| estado del juego (quién está, arranca, aura en vivo, resultado, mute) | WebSocket contra un Durable Object | barato, confiable, ordenado |
+| video y audio | WebRTC peer to peer, en malla | mandar media por un Worker costaría plata y sumaría un salto de latencia por cuadro |
 
 Separarlos es lo que hace que **la batalla funcione aunque el video nunca conecte**. Entre dos NAT hostiles y sin servidor TURN eso pasa seguido; se pierde verse las caras, no la partida. Al revés —todo por el data channel de WebRTC— una negociación fallida se llevaba puesto el partido entero.
 
-El primero en entrar es el **anfitrión**: es el único que manda la oferta WebRTC y el único que da la orden de arrancar. Sin un rol fijo los dos ofrecían a la vez, la negociación entraba en colisión y no cerraba nunca, y salían dos cuentas regresivas.
+### Quién le ofrece a quién
+
+Cada conexión recibe un `id` en orden de llegada y **ofrece siempre el id más chico**. Es una regla que los dos lados pueden calcular solos, sin coordinarse: sin un rol fijo por par los dos ofrecen a la vez, la negociación entra en colisión y no cierra nunca. El anfitrión (el id más chico que sigue conectado, así que si se va hay otro) es el único que da la orden de arrancar, para que no salgan seis cuentas regresivas.
+
+El `de` de cada mensaje **lo pone el servidor**, nunca el cliente: si no, cualquiera adentro de la sala podría firmar con el id de otro. La señalización va dirigida (`para`), el estado del juego va a todos.
+
+### La malla no escala sola: hay que bajarle el bitrate
+
+Seis personas en malla son cinco envíos por cabeza. Sin control, el teléfono se queda sin encoder antes que sin red — y lo primero que se cae es la detección de pose, que *es* el juego. Por eso `presupuesto()` en `versus.js` baja bitrate, fps y resolución de salida a medida que entra gente (700kbps a 1 rival, 180kbps a 5). Un SFU escalaría mucho mejor, pero cuesta plata y hay que mantenerlo.
+
+### El micrófono no renegocia
+
+El hueco de audio (`addTransceiver('audio', 'sendrecv')`) se abre **siempre**, con o sin micrófono todavía. Así, prender el micro después es un `replaceTrack` y no una renegociación: renegociar en malla es justo donde aparecen las colisiones de oferta, y además habría que decidir quién ofrece cuando el que prende el micro no es el que tiene el rol de oferente. El permiso se pide recién al tocar el botón, no al entrar: la mayoría entra a jugar, no a hablar.
+
+El stream remoto se arma a mano en `ontrack` en vez de tomar `e.streams[0]`: un track puesto con `replaceTrack` sobre un transceiver que se negoció vacío llega **sin msid**, o sea sin stream asociado, y el audio no sonaba nunca.
 
 ### Decisiones sobre desconocidos
 
-Video al azar con desconocidos es el patrón que terminó cerrando Omegle. Tres cosas acotan la superficie:
+Video al azar con desconocidos es el patrón que terminó cerrando Omegle. Lo que acota la superficie:
 
-- **No es chat abierto.** El video se ve durante los 15 segundos de la ronda y se corta.
-- **SALTAR** está siempre visible sobre el recuadro del rival.
-- **La cara del rival no entra en tu clip.** El recuadro vive en el DOM, sobre el canvas, no dentro: `captureStream()` graba el canvas, así que nadie se lleva grabada la cara de un desconocido a la galería.
+- **No es chat abierto.** La sala al azar es de dos y la ronda dura 15 segundos.
+- **SIGUIENTE** está siempre visible en la barra, también a mitad de ronda.
+- **El micrófono arranca apagado**, y al salir de la sala el track se suelta (no queda prendida la lucecita del sistema).
+- **La cara de los demás no entra en tu clip.** Los recuadros ajenos viven en el DOM, no adentro del canvas: `captureStream()` graba el canvas, así que nadie se lleva grabada la cara de un desconocido a la galería.
 
 El relay tiene lista blanca de mensajes: lo que no es del protocolo no se reenvía. El handshake del WebSocket valida `Origin` a mano, porque el navegador no le aplica CORS.
+
+**El cupo lo fija quien abre la sala** y después no se toca. Si cada uno trajera el suyo, un tercero entraría a un uno contra uno con solo pedir `max=6` en la URL.
+
+### La sala sobrevive a la ronda
+
+Terminar una ronda ya no desconecta a nadie: la cámara sigue prendida (los demás te tienen que seguir viendo mientras miran el resultado, como en cualquier videollamada) y desde el resultado se puede **VOLVER A LA SALA** y jugar otra sin renegociar nada. En la cola al azar el botón es **SIGUIENTE RIVAL**, que corta y vuelve a la cola sin pasar por el menú. **OTRA VEZ** siempre es en solitario.
+
+Ojo con esto: irse de una sala tiene que cortar la ronda en curso (`state` a `'idle'` y cancelar el grabador). Saltar a mitad de partida dejaba el estado en `'running'` para siempre y **la sala siguiente ya no arrancaba nunca**, porque tanto el arranque automático como el botón del anfitrión sólo corren desde `'idle'`.
 
 ### Durable Objects en el plan gratis
 
@@ -264,6 +304,20 @@ npm run deploy
 Compila y publica la rama `gh-pages`.
 
 ## Rendimiento
+
+### Lo que se hace distinto en teléfono
+
+El cuello de un teléfono **no es el hilo principal** —medido con la CPU frenada 10× en escritorio, el trabajo por cuadro sube apenas de 2.5 a 7.2 ms y el clip sigue saliendo a 60fps—: es la GPU y el codificador de video. Así que lo que se recorta es lo que les pega a ellos:
+
+| qué | por qué |
+|---|---|
+| cámara a **30fps** en móvil (`(hover: none) and (pointer: coarse)`) | pedir 60 hace justo lo contrario de lo que se quiere: muchas cámaras de teléfono solo llegan a 60 **bajando la resolución**, y menos resolución arruina los landmarks. Encima duplica captura, decodificación del `<video>` y `VideoFrame`s que abrir y cerrar, a cambio de nada: el clip se graba a los fps del **canvas** |
+| **`captureStream(30)`** si la prueba de esfuerzo midió menos de 50fps | capturar a 60 le pide al compositor muestrear 60 veces por segundo y al codificador comprimir 60 cuadros, aunque el canvas dibuje a 30. Un clip de 30fps completo se ve mejor que uno de 60 al que le faltan cuadros |
+| **sin `backdrop-filter`** en pantallas chicas | desenfocar el fondo obliga a copiar y desenfocar todo lo que hay detrás del panel, y detrás hay un canvas redibujándose. Con el fondo al 93% de opacidad no se veía igual: se pagaba carísimo por nada |
+| escalón extra de resolución (**0.4 → 288×512**) | el piso era 0.5 y un aparato que ahí seguía a 25fps no tenía a dónde bajar |
+| el lobby dibuja a **30fps** | esperando no se graba nada, y un teléfono que se calienta esperando entra a la ronda con la CPU ya limitada |
+
+Para saber qué le pasa a un aparato concreto, `?debug` en la URL: la pantalla de resultado agrega `MOTOR`, `INFERENCIA`, `CAPTURA`, `TRABAJO`, `DETECCIÓN/s` y `CLIP`. **`MOTOR HILO PRINCIPAL` es la señal de alarma**: significa que el worker no arrancó y la inferencia está bloqueando el dibujo.
 
 El clip se graba a los fps a los que **de verdad** se dibujó el canvas: `captureStream` solo captura cuando el canvas se redibuja. La pantalla de resultado muestra siempre `CLIP N FPS · Np` — ese es el número del archivo, no una promesa.
 

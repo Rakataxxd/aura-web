@@ -17,15 +17,36 @@
 <body>
   <div id="stage">
     <video id="cam" playsinline muted></video>
-    <canvas id="view"></canvas>
 
-    <!-- Cara del rival. Va FUERA del canvas a proposito: el clip que se
-         descarga graba el canvas, y nadie se lleva grabada la cara de un
-         desconocido a su galeria. -->
-    <div class="rival hidden" id="rivalCaja">
-      <video id="rivalVid" playsinline autoplay muted></video>
-      <div class="rival-aura"><b id="rivalAura">0</b></div>
-      <button class="rival-saltar" id="rivalSaltar" title="Saltar rival">SALTAR</button>
+    <!-- La grilla de la sala. Mi recuadro es el canvas del juego (con los
+         efectos de aura); los de los demas son video crudo.
+         Las caras ajenas viven en el DOM y NO adentro del canvas a proposito:
+         el clip que se descarga graba el canvas, y nadie se lleva grabada la
+         cara de un desconocido a su galeria. -->
+    <div id="tiles" class="solo">
+      <div class="tile yo" id="tileYo">
+        <canvas id="view"></canvas>
+        <span class="tile-nombre" id="miNombre">VOS</span>
+        <span class="tile-aura" id="miAura"></span>
+      </div>
+    </div>
+
+    <!-- Lobby: flota SOBRE la grilla en vez de taparla, para que la sala se
+         sienta una sala —se ve quién va entrando— y no una pantalla de espera
+         a ciegas. Desaparece mientras se juega. -->
+    <div class="lobby hidden" id="lobby">
+      <button class="lobby-cod" id="lobbyCodigo" title="Copiar código">····</button>
+      <p class="lobby-quienes" id="lobbyQuienes"></p>
+      <button class="btn small" id="lobbyEmpezar">EMPEZAR BATALLA</button>
+      <p class="fine" id="lobbyFine"></p>
+    </div>
+
+    <!-- Controles de la sala. Solo se ven estando adentro de una. -->
+    <div class="barra hidden" id="barra">
+      <button class="chip" id="barraCodigo" title="Copiar código">····</button>
+      <button class="chip" id="btnMic">MIC OFF</button>
+      <button class="chip hidden" id="btnSiguiente">SIGUIENTE</button>
+      <button class="chip rojo" id="btnSalir">SALIR</button>
     </div>
 
     <!-- INTRO -->
@@ -52,9 +73,11 @@
     <!-- RESULTADO -->
     <section class="panel hidden" id="result">
       <div class="tape" id="rTape">VEREDICTO</div>
+      <p class="marcador hidden" id="rMarcador"></p>
       <div class="score" id="rScore">0</div>
       <h2 id="rTitle">—</h2>
       <p class="lede" id="rSub">—</p>
+      <ol class="tabla sala hidden" id="rSala"></ol>
       <div class="stats" id="rStats"></div>
 
       <!-- alta al torneo: solo aparece si hay backend configurado -->
@@ -66,6 +89,8 @@
       <p class="fine" id="altaMsg"></p>
 
       <button class="btn" id="share">DESCARGAR CLIP</button>
+      <button class="btn hidden" id="nextRival">SIGUIENTE RIVAL</button>
+      <button class="btn hidden" id="backSala">VOLVER A LA SALA</button>
       <button class="btn ghost" id="again">OTRA VEZ</button>
       <p class="fine" id="rNote"></p>
     </section>
@@ -73,7 +98,7 @@
     <!-- VERSUS: elegir modo -->
     <section class="panel hidden" id="versus">
       <div class="tape">BATALLA ONLINE</div>
-      <p class="lede">15 segundos, uno contra uno.<br />Gana el que junte más aura.</p>
+      <p class="lede">15 segundos. Gana el que junte más aura.<br />Al azar es 1 contra 1; con código entran hasta 6.</p>
       <button class="btn" id="vsBuscar">BUSCAR RIVAL</button>
       <div class="rank-alta">
         <input id="vsCodigo" class="alias" maxlength="4" autocomplete="off"
@@ -83,16 +108,6 @@
       <button class="btn ghost" id="vsCrear">CREAR SALA CON AMIGOS</button>
       <p class="fine" id="vsMsg"></p>
       <button class="btn ghost" id="vsVolver">VOLVER</button>
-    </section>
-
-    <!-- VERSUS: sala de espera -->
-    <section class="panel hidden" id="sala">
-      <div class="tape">SALA</div>
-      <div class="codigo" id="salaCodigo">····</div>
-      <p class="lede" id="salaMsg">Esperando rival…</p>
-      <div class="spinner"></div>
-      <p class="fine" id="salaFine">Pasale el código a quien quieras retar.</p>
-      <button class="btn ghost" id="salaSalir">CANCELAR</button>
     </section>
 
     <!-- RANKING -->

@@ -12,6 +12,8 @@
 //   GET  /api/ranking?ambito=global|pais|region&periodo=dia|semana|historico
 //                     [&alias=x] [&limite=50]
 //   GET  /api/salud
+//   WS   /api/cola                              cola de desconocidos (1v1)
+//   WS   /api/sala?codigo=XXXX[&max=N][&alias=x] sala de hasta 6
 
 import { Sala, Lobby, codigoValido } from './salas.js';
 export { Sala, Lobby };
