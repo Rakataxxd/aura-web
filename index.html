@@ -55,15 +55,15 @@
       <h1>ESCÁNER<br /><em>DE AURA</em></h1>
       <p class="lede">Poné la cámara. Movete 15 segundos.<br />El escáner hace el resto.</p>
       <div class="acciones">
-        <button class="btn" id="go">ESCANEAR SOLO</button>
-        <button class="btn ghost hidden" id="irAzar">BUSCAR RIVAL</button>
-        <button class="btn ghost hidden" id="irCrear">CREAR SALA</button>
         <div class="rank-alta hidden" id="filaCodigo">
           <input id="vsCodigo" class="alias" maxlength="4" autocomplete="off"
                  autocapitalize="characters" spellcheck="false" placeholder="CÓDIGO" />
-          <button class="btn ghost small" id="vsEntrar">ENTRAR</button>
+          <button class="btn small" id="vsEntrar">ENTRAR</button>
         </div>
-        <button class="btn ghost hidden" id="verRank">VER RANKING</button>
+        <button class="btn" id="go">ESCANEAR SOLO</button>
+        <button class="btn hidden" id="irAzar">BUSCAR RIVAL</button>
+        <button class="btn hidden" id="irCrear">CREAR SALA</button>
+        <button class="btn hidden" id="verRank">VER RANKING</button>
       </div>
       <p class="fine alerta" id="introMsg"></p>
       <p class="fine" id="note">El escáner corre en tu teléfono. En batalla, el video va directo al rival.</p>
@@ -98,9 +98,8 @@
       <p class="fine" id="altaMsg"></p>
 
       <button class="btn" id="share">DESCARGAR CLIP</button>
-      <button class="btn hidden" id="nextRival">SIGUIENTE RIVAL</button>
-      <button class="btn hidden" id="backSala">VOLVER A LA SALA</button>
-      <button class="btn ghost" id="again">OTRA VEZ</button>
+      <button class="btn" id="again">OTRA VEZ</button>
+      <button class="btn" id="backMenu">REGRESAR</button>
       <p class="fine" id="rNote"></p>
     </section>
 
@@ -111,7 +110,7 @@
       <p class="lede">Duelo al mejor de 3<br />contra un desconocido.</p>
       <div class="spinner"></div>
       <p class="fine" id="buscMsg">Emparejando…</p>
-      <button class="btn ghost" id="buscCancelar">CANCELAR</button>
+      <button class="btn" id="buscCancelar">CANCELAR</button>
     </section>
 
     <!-- RANKING -->
@@ -130,14 +129,14 @@
       <p class="fine" id="rankDonde"></p>
       <ol class="tabla" id="tabla"></ol>
       <p class="fine" id="rankYo"></p>
-      <button class="btn ghost" id="rankVolver">VOLVER</button>
+      <button class="btn" id="rankVolver">VOLVER</button>
     </section>
 
     <!-- ERROR -->
     <section class="panel hidden" id="oops">
       <div class="tape alert">ERROR</div>
       <p class="lede" id="oopsmsg">Algo falló.</p>
-      <button class="btn ghost" id="retry">REINTENTAR</button>
+      <button class="btn" id="retry">REINTENTAR</button>
     </section>
   </div>
   <script type="module" src="/src/main.js"></script>

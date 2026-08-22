@@ -201,11 +201,19 @@ El lobby de espera va **encima** de la grilla y no como panel a pantalla complet
 
 ### El duelo al mejor de tres
 
-La cola al azar no es una ronda suelta: gana el **primero que se lleva dos rondas**, y si eso pasa en la segunda no se juega la tercera. Entre rondas hay cinco segundos para leer el resultado y la siguiente arranca sola.
+**Ninguna batalla es una ronda suelta**, ni contra un desconocido ni en una sala de seis: gana el primero que se lleva **dos rondas**, y si eso pasa en la segunda no se juega la tercera. Entre rondas hay cinco segundos para leer el resultado y la siguiente arranca sola.
 
-**El marcador no viaja por la red.** Cada lado lo calcula con los mismos dos números que ya tiene (mi aura y la del otro), así que no hay ningún mensaje de marcador que se pueda perder o desincronizar: si los dos vieron las mismas rondas, los dos llegan al mismo resultado. Un empate no da punto a nadie.
+**Una ronda no es el final de nada.** Entre rondas no aparece ni el alta al torneo, ni el clip, ni los botones de salida: eso es el cierre de una partida y la partida sigue. Lo único que se ve es cómo quedó la ronda, el marcador y que viene la siguiente. Al cerrar el duelo la tabla deja de mostrar auras y pasa a mostrar **puntos**, y recién ahí aparecen las dos salidas: **OTRA VEZ** (otro rival en la cola, otro duelo en la sala, otra ronda si venías solo) y **REGRESAR**.
 
-Ojo con el arranque automático: solo la **primera** ronda del duelo arranca sola. Sin ese candado, cualquier cosa que moviera la lista de gente —alguien prendiendo el micrófono, sin ir más lejos— largaba una ronda encima del resultado que estabas leyendo.
+Lo que se sube al torneo y lo que sale en el clip es **tu mejor ronda del duelo**, no la última: una tercera ronda floja te borraba la primera, que era la buena.
+
+**El marcador no viaja por la red.** Cada uno lo calcula con los números que ya tiene —el `fin` de cada ronda le llega a todos—, así que no hay ningún mensaje de marcador que se pueda perder o desincronizar: si los dos vieron las mismas rondas, los dos llegan al mismo resultado. El empate arriba no le da el punto a nadie: repartirlo permitiría que un duelo de tres rondas terminara con los dos en dos.
+
+Ojo con el arranque automático: solo la **primera** ronda del duelo al azar arranca sola. Sin ese candado, cualquier cosa que moviera la lista de gente —alguien prendiendo el micrófono, sin ir más lejos— largaba una ronda encima del resultado que estabas leyendo.
+
+### El micrófono viene prendido
+
+Se pide al **entrar** a cualquier sala y arranca encendido. Antes se pedía recién al tocar el botón y arrancaba apagado, y el resultado era el previsible: nadie se acuerda de prenderlo justo cuando ya está jugando, así que las salas eran mudas. Si el permiso se niega, el juego sigue sin audio —nunca dependió de eso— y el botón queda como **mute**, no como interruptor de encendido.
 
 ### Dos canales, a propósito
 

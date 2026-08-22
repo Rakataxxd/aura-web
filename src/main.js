@@ -27,7 +27,7 @@ const el = {
   lobby: $('lobby'), lobbyCodigo: $('lobbyCodigo'), lobbyQuienes: $('lobbyQuienes'),
   lobbyEmpezar: $('lobbyEmpezar'), lobbyFine: $('lobbyFine'),
   go: $('go'), share: $('share'), again: $('again'), retry: $('retry'),
-  nextRival: $('nextRival'), backSala: $('backSala'), rSala: $('rSala'), rMarcador: $('rMarcador'),
+  backMenu: $('backMenu'), rSala: $('rSala'), rMarcador: $('rMarcador'),
   countnum: $('countnum'), loadmsg: $('loadmsg'), oopsmsg: $('oopsmsg'),
   rScore: $('rScore'), rTitle: $('rTitle'), rSub: $('rSub'), rStats: $('rStats'), rNote: $('rNote'),
   rTape: $('rTape'),
@@ -427,6 +427,10 @@ async function boot(arrancarYa = true) {
 }
 
 function countdown() {
+  // Jugando solo, cada ronda es su propia partida: sin esto, la mejor ronda
+  // de la partida ANTERIOR seguia mandando y una ronda floja mostraba el
+  // resultado de la anterior.
+  if (modo !== 'versus') reiniciarDuelo();
   players = [new Player(0), new Player(1)];
   roundLeft = ROUND_SECONDS;
   stressFps = [];
@@ -700,37 +704,72 @@ async function finish() {
         ? `Nadie de los ${cerraron.length} te alcanzó.`
         : `Quedaste ${puesto}º entre ${cerraron.length}.`;
     }
-    // El 1v1 al azar no es una ronda suelta: es un duelo al mejor de tres.
-    if (tipoSala === 'azar') puntuarDuelo(aura, cerraron);
-    else el.rMarcador.classList.add('hidden');
-    // La sala NO se cierra: se sigue viendo a todos y se puede jugar otra
-    // ronda sin volver a negociar nada.
+    // Una ronda NO es la partida: la partida son tres.
+    dueloCerrado = puntuarRonda(filas);
+    el.rMarcador.classList.remove('hidden');
+    if (!dueloCerrado) {
+      el.rMarcador.textContent = `RONDA ${rondaN}/${RONDAS}  ·  ${marcadorTexto(filas)}`;
+      programarSiguienteRonda();
+      el.rSub.textContent += `  Va la ronda ${rondaN} de ${RONDAS}…`;
+    } else {
+      const orden = pintarTablaDuelo(filas);
+      el.rMarcador.textContent = `DUELO CERRADO  ·  ${marcadorTexto(filas)}`;
+      const primeros = orden.filter((f) => f.pts === orden[0].pts);
+      const gane = orden[0].yo && primeros.length === 1;
+      const empate = primeros.length > 1 && primeros.some((f) => f.yo);
+      el.rTape.textContent = gane ? 'GANÁS EL DUELO' : (empate ? 'DUELO EMPATADO' : 'PERDÉS EL DUELO');
+      el.rTape.classList.toggle('alert', !gane && !empate);
+    }
+    // La sala NO se cierra: se sigue viendo a todos y se puede jugar otro
+    // duelo sin volver a negociar nada.
   } else {
+    dueloCerrado = true;          // en solo, la ronda ES la partida
     el.rSala.classList.add('hidden');
     el.rMarcador.classList.add('hidden');
   }
 
-  // A donde se puede ir desde el resultado. "OTRA VEZ" siempre es solo; los
-  // otros dos aparecen segun de donde venga la partida.
-  const enSala = modo === 'versus' && !!batalla?.vivo;
-  el.nextRival.classList.toggle('hidden', !(enSala && tipoSala === 'azar'));
-  el.backSala.classList.toggle('hidden', !(enSala && tipoSala === 'privada'));
-  el.again.textContent = enSala ? 'JUGAR SOLO' : 'OTRA VEZ';
+  // Mi mejor ronda del duelo es la que vale: es la que se sube al torneo y la
+  // del clip. Guardar la ULTIMA en vez de la mejor hacia que una tercera
+  // ronda floja te borrara la primera, que era la buena.
+  if (!mejorRonda || aura > mejorRonda.aura) {
+    mejorRonda = { aura, moves: landed, blob, titulo: v.t, sub: el.rSub.textContent, stats: el.rStats.innerHTML };
+  }
 
-  // Lo que se sube al torneo. Se guarda al cerrar la ronda y no se recalcula
-  // despues: `players` se reinicia en "otra vez" y el alias se puede escribir
-  // en cualquier momento, incluso con otra ronda ya empezando.
-  ultimaPartida = { aura, moves: landed };
-  prepararAlta();
+  // ENTRE RONDAS NO SE CIERRA NADA. Ni torneo, ni clip, ni botones: eso es el
+  // final de una partida y la partida sigue. Lo unico que se ve es como quedo
+  // la ronda y que viene la siguiente.
+  el.alta.classList.toggle('hidden', !dueloCerrado || !hayApi());
+  el.share.classList.toggle('hidden', !dueloCerrado);
+  el.again.classList.toggle('hidden', !dueloCerrado);
+  el.backMenu.classList.toggle('hidden', !dueloCerrado);
+  el.altaMsg.textContent = '';
+  el.rNote.textContent = '';
 
-  if (blob) {
-    el.share.classList.remove('hidden');
-    el.share.textContent = navigator.canShare?.({ files: [new File([blob], 'x', { type: blob.type })] })
-      ? 'COMPARTIR CLIP' : 'DESCARGAR CLIP';
-    el.rNote.textContent = '';
-  } else {
-    el.share.classList.add('hidden');
-    el.rNote.textContent = 'Tu navegador no permite grabar. El escáner sí funcionó.';
+  if (dueloCerrado) {
+    // El resultado que se muestra al cerrar es el de la mejor ronda, para que
+    // el numero grande, el clip y lo que se sube al torneo sean lo mismo.
+    if (rondaN > 1 || mejorRonda.aura !== aura) {
+      el.rScore.textContent = mejorRonda.aura.toLocaleString('es-GT');
+      el.rTitle.textContent = mejorRonda.titulo;
+      el.rStats.innerHTML = mejorRonda.stats;
+      blob = mejorRonda.blob;
+    }
+    // Lo que se sube al torneo. Se congela aca y no se recalcula despues:
+    // `players` se reinicia en "otra vez" y el alias se puede escribir en
+    // cualquier momento, incluso con otra ronda ya empezando.
+    ultimaPartida = { aura: mejorRonda.aura, moves: mejorRonda.moves };
+    prepararAlta();
+    el.again.textContent = modo === 'versus' && batalla?.vivo
+      ? (tipoSala === 'azar' ? 'OTRO RIVAL' : 'OTRA VEZ')
+      : 'OTRA VEZ';
+
+    if (blob) {
+      el.share.textContent = navigator.canShare?.({ files: [new File([blob], 'x', { type: blob.type })] })
+        ? 'COMPARTIR CLIP' : 'DESCARGAR CLIP';
+    } else {
+      el.share.classList.add('hidden');
+      el.rNote.textContent = 'Tu navegador no permite grabar. El escáner sí funcionó.';
+    }
   }
   show('result');
 }
@@ -747,21 +786,34 @@ let proximaRonda = 0;         // timeout de la ronda siguiente del duelo
 const buscador = new Batalla();   // solo para la cola; la sala usa `batalla`
 const tiles = new Map();      // id -> {caja, video, nombre, aura}
 
-// El duelo al azar es al mejor de tres: el primero que gana DOS se lo lleva y
-// no se juega la tercera. Cada lado saca la cuenta por su cuenta con los
-// mismos dos numeros (mi aura y la suya), asi que no hace falta ningun mensaje
-// de marcador que pueda desincronizarse.
+// TODA batalla es un duelo al mejor de tres, sea contra un desconocido o en
+// una sala de seis: el que gana DOS se lo lleva y no se juega la tercera.
+//
+// Cada uno lleva la cuenta por su lado con los mismos numeros —el `fin` de
+// cada ronda le llega a todos—, asi que no hay ningun mensaje de marcador que
+// se pueda perder o desincronizar.
 const RONDAS = 3;
 const META = 2;
-let marcador = { yo: 0, rival: 0 };
 let rondaN = 1;
+let puntos = new Map();       // 'yo' | id de par -> rondas ganadas
 let dueloArrancado = false;
+let dueloCerrado = false;
+let mejorRonda = null;        // mi mejor ronda del duelo: es la que cuenta al final
 
-/** Lo que ven los demas: la camara, y el micro si lo prendieron. */
+function reiniciarDuelo() {
+  rondaN = 1;
+  puntos = new Map();
+  dueloCerrado = false;
+  mejorRonda = null;
+}
+
+/**
+ * Lo que ven los demas. Solo video: el audio no va por aca sino por el
+ * transceiver que `conectar()` abre siempre, que es lo que permite prender el
+ * micro despues sin renegociar.
+ */
 function armarSalida() {
-  const tks = [...(stream?.getVideoTracks?.() ?? [])];
-  if (micTrack) tks.push(micTrack);
-  return new MediaStream(tks);
+  return new MediaStream(stream?.getVideoTracks?.() ?? []);
 }
 
 function crearTile(id) {
@@ -842,8 +894,9 @@ function actualizarBarra() {
     const n = batalla.cuantos();
     el.barraCodigo.textContent = tipoSala === 'azar' ? `AL AZAR ${n}/2` : `${batalla.codigo} ${n}/${batalla.max}`;
     el.btnSiguiente.classList.toggle('hidden', tipoSala !== 'azar');
-    el.btnMic.textContent = micOn ? 'MIC ON' : 'MIC OFF';
+    el.btnMic.textContent = micTrack ? (micOn ? 'MIC ON' : 'MIC OFF') : 'SIN MIC';
     el.btnMic.classList.toggle('on', micOn);
+    el.btnMic.disabled = false;   // sin permiso igual se puede reintentar
   }
   // El lobby se apoya sobre la barra, y la barra puede ocupar dos renglones
   // en un telefono angosto: se mide, no se adivina.
@@ -871,9 +924,10 @@ function actualizarLobby(tapada = false) {
   const anfitrion = batalla.soyAnfitrion();
   const nombres = [getAlias() || 'VOS', ...gente.map((p) => p.alias || 'INVITADO')];
 
+  const mios = puntos.get('yo') ?? 0;
   if (tipoSala === 'azar') {
-    el.lobbyCodigo.textContent = n < 2 ? 'BUSCANDO' : `${marcador.yo} - ${marcador.rival}`;
-    el.lobbyQuienes.textContent = n < 2 ? 'Esperando rival…' : `RONDA ${rondaN} DE ${RONDAS}`;
+    el.lobbyCodigo.textContent = n < 2 ? 'BUSCANDO' : `${rondaN}/${RONDAS}`;
+    el.lobbyQuienes.textContent = n < 2 ? 'Esperando rival…' : `DUELO AL MEJOR DE ${RONDAS} · LLEVÁS ${mios}`;
     el.lobbyEmpezar.classList.add('hidden');
     el.lobbyFine.textContent = n < 2 ? '' : 'Arranca solo.';
     return;
@@ -884,7 +938,7 @@ function actualizarLobby(tapada = false) {
   el.lobbyQuienes.textContent = `${n}/${batalla.max} · ${nombres.join(' · ')}`;
   el.lobbyEmpezar.classList.toggle('hidden', !anfitrion);
   el.lobbyEmpezar.disabled = n < 2;
-  el.lobbyEmpezar.textContent = n < 2 ? 'FALTA GENTE' : 'EMPEZAR BATALLA';
+  el.lobbyEmpezar.textContent = n < 2 ? 'FALTA GENTE' : `EMPEZAR (AL MEJOR DE ${RONDAS})`;
   // Si no soy el anfitrión, lo es el id más chico, y `lista()` viene ordenada.
   el.lobbyFine.textContent = anfitrion
     ? (n < 2 ? 'Pasale el código a quien quieras retar.' : 'Cuando quieras.')
@@ -892,31 +946,38 @@ function actualizarLobby(tapada = false) {
 }
 
 /**
- * Prende y apaga el microfono.
+ * Consigue el microfono. Se pide al ENTRAR a cualquier sala y arranca
+ * PRENDIDO.
  *
- * El permiso se pide RECIEN al tocar el boton y no al entrar a la sala: la
- * mayoria entra a jugar, no a hablar, y una negativa deja el micro bloqueado
- * para siempre en ese sitio. Como el hueco del audio ya viene negociado desde
- * que se armo la conexion, poner el track despues no renegocia nada.
+ * Antes se pedia recien al tocar el boton y arrancaba apagado, y el resultado
+ * era el previsible: nadie se acordaba de prenderlo justo cuando ya estaba
+ * jugando, asi que las salas eran mudas. Si lo niegan se sigue sin audio —el
+ * juego no depende de eso—, pero el botón queda como mute, no como interruptor
+ * de encendido.
  */
+async function pedirMicro() {
+  if (micTrack) return true;
+  try {
+    const a = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    micTrack = a.getAudioTracks()[0] || null;
+  } catch { micTrack = null; }
+  micOn = !!micTrack;
+  if (micTrack) micTrack.enabled = true;
+  return !!micTrack;
+}
+
+/** El botón es un MUTE: el micro ya viene pedido desde que entraste. */
 async function alternarMicro() {
   if (!batalla) return;
   if (!micTrack) {
-    try {
-      const a = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      micTrack = a.getAudioTracks()[0] || null;
-    } catch {
-      el.btnMic.disabled = true;
-      el.btnMic.textContent = 'SIN MIC';
-      return;
-    }
-    if (!micTrack) return;
+    if (!await pedirMicro()) { actualizarBarra(); return; }
     await batalla.ponerMicro(micTrack);
+  } else {
+    micOn = !micOn;
+    micTrack.enabled = micOn;
   }
-  micOn = !micOn;
-  micTrack.enabled = micOn;
   batalla.avisarMicro(micOn);
   pintarSala();
 }
@@ -938,8 +999,8 @@ function pintarResultadoSala(miAura) {
   el.rSala.classList.toggle('hidden', !gente.length);
 
   const filas = [
-    { alias: getAlias() || 'VOS', aura: miAura, yo: true },
-    ...gente.map((p) => ({ alias: p.alias || 'INVITADO', aura: p.fin ? p.fin.aura : null, yo: false })),
+    { clave: 'yo', alias: getAlias() || 'VOS', aura: miAura, yo: true },
+    ...gente.map((p) => ({ clave: p.id, alias: p.alias || 'INVITADO', aura: p.fin ? p.fin.aura : null, yo: false })),
   ];
   // Los que no cerraron van al fondo: se fueron, o entraron a mitad de ronda.
   filas.sort((a, b) => (b.aura ?? -1) - (a.aura ?? -1));
@@ -969,6 +1030,9 @@ function empezarRonda() {
   clearTimeout(arranqueAzar);
   clearTimeout(proximaRonda);
   arranqueAzar = proximaRonda = 0;
+  // Empezar con el duelo anterior ya cerrado significa que esto es un duelo
+  // NUEVO: se borra el marcador viejo antes de la primera ronda.
+  if (dueloCerrado) reiniciarDuelo();
   dueloArrancado = true;
   participantes = batalla ? batalla.lista().map((p) => p.id) : [];
   batalla?.limpiarRonda();
@@ -976,45 +1040,77 @@ function empezarRonda() {
   countdown();
 }
 
-/** Marcador del duelo al mejor de tres. Solo corre en la cola al azar. */
-function puntuarDuelo(miAura, cerraron) {
-  const otro = cerraron.find((f) => !f.yo);
-  if (otro) {
-    if (miAura > otro.aura) marcador.yo++;
-    else if (otro.aura > miAura) marcador.rival++;   // el empate no da punto
+/**
+ * Reparte el punto de la ronda y dice si el duelo terminó.
+ *
+ * El empate arriba no le da el punto a nadie: repartirlo a los dos permitiría
+ * que un duelo de tres rondas terminara con los dos en dos.
+ */
+function puntuarRonda(filas) {
+  const cerraron = filas.filter((f) => f.aura != null);
+  if (cerraron.length > 1) {
+    const tope = Math.max(...cerraron.map((f) => f.aura));
+    const arriba = cerraron.filter((f) => f.aura === tope);
+    if (arriba.length === 1) puntos.set(arriba[0].clave, (puntos.get(arriba[0].clave) ?? 0) + 1);
   }
-  const gane = marcador.yo >= META;
-  const perdi = marcador.rival >= META;
-  // Se cierra por llegar a dos o por quedarse sin rondas. Que el rival se
-  // haya ido tambien cierra: no hay contra quien seguir.
-  const ultima = gane || perdi || rondaN >= RONDAS || !otro;
+  const lider = Math.max(0, ...puntos.values());
+  // Con tres rondas, dos victorias ya son inalcanzables. Tambien cierra por
+  // quedarse sin rondas o sin rivales: seguir solo no tiene sentido.
+  return lider >= META || rondaN >= RONDAS || (batalla?.cuantos() ?? 1) < 2;
+}
 
-  el.rMarcador.classList.remove('hidden');
-  el.rMarcador.textContent = `RONDA ${rondaN}/${RONDAS}  ·  VOS ${marcador.yo} — ${marcador.rival} RIVAL`;
+/**
+ * La orden la da el anfitrión para que todos arranquen juntos; los demas solo
+ * esperan el `arranca`. Los cinco segundos son para poder leer el resultado
+ * sin que se lo lleve por delante la cuenta regresiva de la ronda siguiente.
+ */
+function programarSiguienteRonda() {
+  rondaN++;
+  if (!batalla?.soyAnfitrion()) return;
+  proximaRonda = setTimeout(() => {
+    proximaRonda = 0;
+    // Se pudieron haber ido todos en estos cinco segundos: una ronda contra
+    // nadie no le sirve a nadie.
+    if (batalla?.cuantos() >= 2 && batalla.arrancar()) empezarRonda();
+  }, 5000);
+}
 
-  if (!ultima) {
-    rondaN++;
-    el.rSub.textContent += `  Va la ronda ${rondaN}…`;
-    // La orden la da el anfitrión para que los dos arranquen juntos; el otro
-    // solo espera el `arranca`. Los 5 segundos son para poder leer el
-    // resultado sin que se lo lleve por delante la cuenta regresiva.
-    if (batalla?.soyAnfitrion()) {
-      proximaRonda = setTimeout(() => {
-        proximaRonda = 0;
-        // El rival pudo haberse ido en estos cinco segundos: jugar una ronda
-        // contra nadie no le sirve a nadie.
-        if (batalla?.cuantos() >= 2 && batalla.arrancar()) empezarRonda();
-      }, 5000);
-    }
-    return;
+/** "VOS 1 — 1 RIVAL" en un uno contra uno; con más gente, tus puntos. */
+function marcadorTexto(filas) {
+  const mios = puntos.get('yo') ?? 0;
+  if (filas.length === 2) {
+    const otro = filas.find((f) => !f.yo);
+    return `VOS ${mios} — ${puntos.get(otro.clave) ?? 0} RIVAL`;
   }
+  return `LLEVÁS ${mios} PT${mios === 1 ? '' : 'S'}`;
+}
 
-  el.rTape.textContent = gane ? 'GANÁS EL DUELO'
-    : perdi ? 'PERDÉS EL DUELO'
-      : marcador.yo > marcador.rival ? 'GANÁS EL DUELO'
-        : marcador.yo < marcador.rival ? 'PERDÉS EL DUELO' : 'DUELO EMPATADO';
-  el.rTape.classList.toggle('alert', marcador.yo < marcador.rival);
-  if (!otro && rondaN < RONDAS) el.rSub.textContent = 'El rival se fue. El duelo queda acá.';
+/** Al cerrar el duelo la tabla deja de ser la ronda y pasa a ser el marcador. */
+function pintarTablaDuelo(filas) {
+  const orden = filas
+    .map((f) => ({ ...f, pts: puntos.get(f.clave) ?? 0 }))
+    .sort((a, b) => b.pts - a.pts || (b.aura ?? -1) - (a.aura ?? -1));
+
+  el.rSala.replaceChildren();
+  el.rSala.classList.remove('hidden');
+  orden.forEach((f, i) => {
+    const li = document.createElement('li');
+    if (f.yo) li.classList.add('yo');
+    if (i === 0) li.classList.add('podio');
+    const pos = document.createElement('span');
+    pos.className = 'pos';
+    pos.textContent = `${i + 1}º`;
+    // El nombre lo escribió otra persona: va como TEXTO, nunca como HTML.
+    const quien = document.createElement('span');
+    quien.className = 'quien';
+    quien.textContent = f.alias;
+    const cuanto = document.createElement('span');
+    cuanto.className = 'cuanto';
+    cuanto.textContent = `${f.pts} pt${f.pts === 1 ? '' : 's'}`;
+    li.append(pos, quien, cuanto);
+    el.rSala.appendChild(li);
+  });
+  return orden;
 }
 
 /**
@@ -1089,8 +1185,7 @@ async function entrarASala(codigo, tipo = 'privada') {
   salirDeSala();
   modo = 'versus';
   tipoSala = tipo;
-  marcador = { yo: 0, rival: 0 };
-  rondaN = 1;
+  reiniciarDuelo();
   dueloArrancado = false;
   if (!await boot(false)) { modo = 'solo'; actualizarBarra(); return; }
 
@@ -1122,15 +1217,35 @@ async function entrarASala(codigo, tipo = 'privada') {
       alMenu('Se cortó la conexión con la sala.');
     },
   });
+  // El micro se pide ANTES de conectarse, para que ya viaje en la primera
+  // negociación y no haya que tocar nada para que te oigan.
+  await pedirMicro();
   batalla.entrar(codigo, {
     salida: armarSalida(),
     alias: getAlias(),
     max: tipo === 'azar' ? 2 : TOPE_SALA,
   });
+  batalla.ponerMicro(micTrack);
+  batalla.avisarMicro(micOn);
 
   show();               // sin paneles: se ve la sala
   pintarSala();
   arrancarLoop();       // verse la cara mientras se espera, como en una call
+}
+
+/**
+ * Envoltorio de entrarASala que NO deja fallar en silencio.
+ *
+ * Es una función async que nadie espera: una excepción adentro se convertía en
+ * un rechazo sin dueño y lo único que se veía desde afuera era un botón que no
+ * hacía nada. Cualquier cosa que salga mal termina en el menú, escrita.
+ */
+function entrar(codigo, tipo) {
+  return entrarASala(codigo, tipo).catch((e) => {
+    console.error('[versus] no se pudo entrar a la sala', e);
+    salirDeSala({ apagarCamara: true });
+    alMenu('No se pudo entrar a la sala.');
+  });
 }
 
 /** Vuelve al menú con el motivo escrito, en vez de dejar la pantalla muda. */
@@ -1152,7 +1267,7 @@ async function buscarYEntrar() {
     // por el mismo camino que los amigos, con cupo de dos. Una sola
     // implementacion de sala en vez de dos que hay que mantener sincronizadas.
     const codigo = await buscador.buscarRival();
-    await entrarASala(codigo, 'azar');
+    await entrar(codigo, 'azar');
   } catch (e) {
     if (e.message === CANCELADO) return;      // se salió a propósito
     alMenu(`${e.message}. Probá de nuevo o armá una sala con código.`);
@@ -1171,14 +1286,14 @@ el.irAzar?.addEventListener('click', () => { startPrefetch(); buscarYEntrar(); }
 el.irCrear?.addEventListener('click', () => {
   startPrefetch();
   el.introMsg.textContent = '';
-  entrarASala(codigoNuevo(), 'privada');
+  entrar(codigoNuevo(), 'privada');
 });
 el.vsEntrar?.addEventListener('click', () => {
   const c = el.vsCodigo.value.trim().toUpperCase();
   if (!codigoValido(c)) { el.introMsg.textContent = 'El código son 4 letras o números.'; return; }
   el.introMsg.textContent = '';
   startPrefetch();
-  entrarASala(c, 'privada');
+  entrar(c, 'privada');
 });
 // El teclado del teléfono muestra "ir" y hay que poder usarlo.
 el.vsCodigo?.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') el.vsEntrar.click(); });
@@ -1211,13 +1326,10 @@ el.barraCodigo?.addEventListener('click', () => copiarCodigo(el.barraCodigo));
 el.lobbyCodigo?.addEventListener('click', () => copiarCodigo(el.lobbyCodigo));
 
 // --- salidas del resultado ---
-el.nextRival?.addEventListener('click', siguienteRival);
-el.backSala?.addEventListener('click', () => {
-  if (!batalla?.vivo) { alMenu('La sala se cerró.'); return; }
-  batalla.limpiarRonda();
-  show();
-  pintarSala();
-  arrancarLoop();
+// Solo dos, y solo al CERRAR el duelo: seguir jugando, o volver al menú.
+el.backMenu?.addEventListener('click', () => {
+  salirDeSala({ apagarCamara: true });
+  alMenu();
 });
 // Sin backend configurado no hay batalla: los accesos ni aparecen, en vez de
 // ofrecer algo que va a fallar.
@@ -1371,7 +1483,16 @@ else setTimeout(startPrefetch, 1200);
 el.go.addEventListener('click', () => { startPrefetch(); boot(); });
 el.retry.addEventListener('click', () => { el.go.disabled = false; show('intro'); });
 el.again.addEventListener('click', async () => {
-  // "OTRA VEZ" es siempre en solitario: si venias de una sala, se sale.
+  // "OTRA VEZ" sigue donde estabas: otro rival en la cola, otro duelo en la
+  // sala, u otra ronda si venías solo.
+  if (modo === 'versus' && batalla?.vivo) {
+    if (tipoSala === 'azar') { siguienteRival(); return; }
+    batalla.limpiarRonda();
+    show();
+    pintarSala();
+    arrancarLoop();
+    return;
+  }
   salirDeSala();
   show('loading');
   if (!await asegurarCamara()) return;

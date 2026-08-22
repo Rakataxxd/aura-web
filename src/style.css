@@ -137,31 +137,28 @@ h2 {
 .stats b { color: var(--acid); font-weight: 400; }
 
 /* ---------- botones ---------- */
+/*
+ * UN SOLO ESTILO para todos. Antes habia dos —el relleno acido con sombra
+ * magenta para la accion principal y el delineado para el resto— pero cada
+ * pantalla terminaba con dos o tres "principales" gritando a la vez
+ * (COMPARTIR CLIP, SIGUIENTE RIVAL, ENTRAR AL TORNEO, todos verdes). Con uno
+ * solo, lo que ordena la pantalla es el ORDEN, no el color.
+ */
 .btn {
   font-family: "Archivo Black", sans-serif;
-  font-size: clamp(15px, 4.2vw, 21px);
+  font-size: 14px;
   letter-spacing: .01em;
-  background: var(--acid);
-  color: var(--ink);
-  border: 0;
-  padding: 17px 34px;
-  cursor: pointer;
-  transform: skewX(-7deg);
-  transition: transform .12s, box-shadow .12s, filter .12s;
-  box-shadow: 7px 7px 0 var(--magenta);
-}
-.btn:hover { transform: skewX(-7deg) translate(-2px, -2px); box-shadow: 10px 10px 0 var(--magenta); }
-.btn:active { transform: skewX(-7deg) translate(4px, 4px); box-shadow: 2px 2px 0 var(--magenta); }
-.btn:disabled { filter: grayscale(1); opacity: .5; cursor: wait; }
-.btn.ghost {
   background: transparent;
   color: var(--bone);
   border: 2px solid rgba(244, 239, 228, .4);
-  box-shadow: none;
   padding: 12px 26px;
-  font-size: 14px;
+  cursor: pointer;
+  transform: skewX(-7deg);
+  transition: transform .12s, border-color .12s, color .12s, filter .12s;
 }
-.btn.ghost:hover { border-color: var(--acid); color: var(--acid); transform: skewX(-7deg); box-shadow: none; }
+.btn:hover { border-color: var(--acid); color: var(--acid); }
+.btn:active { transform: skewX(-7deg) translate(2px, 2px); }
+.btn:disabled { filter: grayscale(1); opacity: .5; cursor: wait; }
 
 /* ---------- cuenta regresiva ---------- */
 #countnum {
@@ -189,10 +186,7 @@ h2 {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- torneo ---------- */
-.btn.small { padding: 12px 18px; font-size: 15px; box-shadow: 5px 5px 0 var(--magenta); }
-/* `.small` viene despues de `.ghost` y le devolvia la sombra: un boton
-   delineado con sombra de boton primario desentona al lado de los otros. */
-.btn.ghost.small { box-shadow: none; }
+.btn.small { padding: 10px 16px; font-size: 13px; }
 
 .rank-alta { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; justify-content: center; }
 
