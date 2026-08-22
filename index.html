@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0a0a0c" />
+<title>ESCÁNER DE AURA</title>
+<meta name="description" content="Poné la cámara. Movete. El escáner mide tu aura en tiempo real y te da un clip para postear." />
+<meta property="og:title" content="ESCÁNER DE AURA" />
+<meta property="og:description" content="¿Cuánta aura tenés? Averigualo en 15 segundos." />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" type="image/svg+xml" href="/aura-web/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Chakra+Petch:wght@600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <script type="module" crossorigin src="/aura-web/assets/index-nqM8W9We.js"></script>
+  <link rel="stylesheet" crossorigin href="/aura-web/assets/index-CXUPNp5g.css">
+</head>
+<body>
+  <div id="stage">
+    <video id="cam" playsinline muted></video>
+
+    <!-- La grilla de la sala. Mi recuadro es el canvas del juego (con los
+         efectos de aura); los de los demas son video crudo.
+         Las caras ajenas viven en el DOM y NO adentro del canvas a proposito:
+         el clip que se descarga graba el canvas, y nadie se lleva grabada la
+         cara de un desconocido a su galeria. -->
+    <div id="tiles" class="solo">
+      <div class="tile yo" id="tileYo">
+        <canvas id="view"></canvas>
+        <span class="tile-nombre" id="miNombre">VOS</span>
+        <span class="tile-aura" id="miAura"></span>
+      </div>
+    </div>
+
+    <!-- Lobby: flota SOBRE la grilla en vez de taparla, para que la sala se
+         sienta una sala —se ve quién va entrando— y no una pantalla de espera
+         a ciegas. Desaparece mientras se juega. -->
+    <div class="lobby hidden" id="lobby">
+      <button class="lobby-cod" id="lobbyCodigo" title="Copiar código">····</button>
+      <p class="lobby-quienes" id="lobbyQuienes"></p>
+      <button class="btn small" id="lobbyEmpezar">EMPEZAR BATALLA</button>
+      <p class="fine" id="lobbyFine"></p>
+    </div>
+
+    <!-- Controles de la sala. Solo se ven estando adentro de una. -->
+    <div class="barra hidden" id="barra">
+      <button class="chip" id="barraCodigo" title="Copiar código">····</button>
+      <button class="chip" id="btnMic">MIC OFF</button>
+      <button class="chip hidden" id="btnSiguiente">SIGUIENTE</button>
+      <button class="chip rojo" id="btnSalir">SALIR</button>
+    </div>
+
+    <!-- INTRO -->
+    <section class="panel" id="intro">
+      <div class="tape">SISTEMA DE MEDICIÓN NO CERTIFICADO</div>
+      <h1>ESCÁNER<br /><em>DE AURA</em></h1>
+      <p class="lede">Poné la cámara. Movete 15 segundos.<br />El escáner hace el resto.</p>
+      <div class="acciones">
+        <div class="rank-alta hidden" id="filaCodigo">
+          <input id="vsCodigo" class="alias" maxlength="4" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" placeholder="CÓDIGO" />
+          <button class="btn small" id="vsEntrar">ENTRAR</button>
+        </div>
+        <button class="btn" id="go">ESCANEAR SOLO</button>
+        <button class="btn hidden" id="irAzar">BUSCAR RIVAL</button>
+        <button class="btn hidden" id="irCrear">CREAR SALA</button>
+        <button class="btn hidden" id="verRank">VER RANKING</button>
+      </div>
+      <p class="fine alerta" id="introMsg"></p>
+      <p class="fine" id="note">El escáner corre en tu teléfono. En batalla, el video va directo al rival.</p>
+    </section>
+
+    <!-- CARGANDO -->
+    <section class="panel hidden" id="loading">
+      <div class="spinner"></div>
+      <p class="lede" id="loadmsg">CALIBRANDO SENSORES…</p>
+      <p class="fine">primera vez tarda unos segundos</p>
+    </section>
+
+    <!-- CUENTA REGRESIVA -->
+    <section class="panel bare hidden" id="count"><span id="countnum">3</span></section>
+
+    <!-- RESULTADO -->
+    <section class="panel hidden" id="result">
+      <div class="tape" id="rTape">VEREDICTO</div>
+      <p class="marcador hidden" id="rMarcador"></p>
+      <div class="score" id="rScore">0</div>
+      <h2 id="rTitle">—</h2>
+      <p class="lede" id="rSub">—</p>
+      <ol class="tabla sala hidden" id="rSala"></ol>
+      <div class="stats" id="rStats"></div>
+
+      <!-- alta al torneo: solo aparece si hay backend configurado -->
+      <div class="rank-alta hidden" id="alta">
+        <input id="alias" class="alias" maxlength="14" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" placeholder="TU NOMBRE" />
+        <button class="btn small" id="subir">ENTRAR AL TORNEO</button>
+      </div>
+      <p class="fine" id="altaMsg"></p>
+
+      <button class="btn" id="share">DESCARGAR CLIP</button>
+      <button class="btn" id="again">OTRA VEZ</button>
+      <button class="btn" id="backMenu">REGRESAR</button>
+      <p class="fine" id="rNote"></p>
+    </section>
+
+    <!-- BUSCANDO RIVAL: la cola puede tardar, así que tiene su propia
+         pantalla con spinner y con salida. -->
+    <section class="panel hidden" id="buscando">
+      <div class="tape">BUSCANDO RIVAL</div>
+      <p class="lede">Duelo al mejor de 3<br />contra un desconocido.</p>
+      <div class="spinner"></div>
+      <p class="fine" id="buscMsg">Emparejando…</p>
+      <button class="btn" id="buscCancelar">CANCELAR</button>
+    </section>
+
+    <!-- RANKING -->
+    <section class="panel hidden" id="rank">
+      <div class="tape">TORNEO</div>
+      <div class="tabs" id="tabAmbito">
+        <button class="tab on" data-v="global">GLOBAL</button>
+        <button class="tab" data-v="pais">PAÍS</button>
+        <button class="tab" data-v="region">REGIÓN</button>
+      </div>
+      <div class="tabs" id="tabPeriodo">
+        <button class="tab on" data-v="dia">HOY</button>
+        <button class="tab" data-v="semana">SEMANA</button>
+        <button class="tab" data-v="historico">HISTÓRICO</button>
+      </div>
+      <p class="fine" id="rankDonde"></p>
+      <ol class="tabla" id="tabla"></ol>
+      <p class="fine" id="rankYo"></p>
+      <button class="btn" id="rankVolver">VOLVER</button>
+    </section>
+
+    <!-- ERROR -->
+    <section class="panel hidden" id="oops">
+      <div class="tape alert">ERROR</div>
+      <p class="lede" id="oopsmsg">Algo falló.</p>
+      <button class="btn" id="retry">REINTENTAR</button>
+    </section>
+  </div>
+</body>
+</html>
