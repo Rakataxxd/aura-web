@@ -190,8 +190,22 @@ h2 {
 
 /* ---------- torneo ---------- */
 .btn.small { padding: 12px 18px; font-size: 15px; box-shadow: 5px 5px 0 var(--magenta); }
+/* `.small` viene despues de `.ghost` y le devolvia la sombra: un boton
+   delineado con sombra de boton primario desentona al lado de los otros. */
+.btn.ghost.small { box-shadow: none; }
 
 .rank-alta { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; justify-content: center; }
+
+/* Los accesos del intro van mas juntos entre si que del titulo: son UNA cosa
+   (elegir modo), y con el `gap` del panel quedaban desperdigados y no
+   entraban en un telefono bajo. */
+.acciones {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.fine.alerta:not(:empty) { color: var(--magenta); }
 
 .alias {
   font-family: "Chakra Petch", system-ui, sans-serif;

@@ -7,7 +7,7 @@ import { detectDap, DAP, brazosCortados } from './moves.js';
 import { toMetric } from './landmarks.js';
 import { verdictFor } from './roasts.js';
 import { hayApi, getAlias, setAlias, aliasValido, enviarPuntaje, traerRanking, nombrePais } from './ranking.js';
-import { Batalla, hayVersus, codigoNuevo, codigoValido, TOPE_SALA } from './versus.js';
+import { Batalla, hayVersus, codigoNuevo, codigoValido, TOPE_SALA, CANCELADO } from './versus.js';
 
 const ROUND_SECONDS = 15;
 const DEBUG = new URLSearchParams(location.search).has('debug');
@@ -17,9 +17,10 @@ const $ = (id) => document.getElementById(id);
 const el = {
   video: $('cam'), canvas: $('view'),
   intro: $('intro'), loading: $('loading'), count: $('count'), result: $('result'), oops: $('oops'),
-  rank: $('rank'), versus: $('versus'),
-  irVersus: $('irVersus'), vsBuscar: $('vsBuscar'), vsCodigo: $('vsCodigo'), vsEntrar: $('vsEntrar'),
-  vsCrear: $('vsCrear'), vsMsg: $('vsMsg'), vsVolver: $('vsVolver'),
+  rank: $('rank'), buscando: $('buscando'),
+  irAzar: $('irAzar'), irCrear: $('irCrear'), filaCodigo: $('filaCodigo'),
+  vsCodigo: $('vsCodigo'), vsEntrar: $('vsEntrar'), introMsg: $('introMsg'),
+  buscMsg: $('buscMsg'), buscCancelar: $('buscCancelar'),
   tiles: $('tiles'), tileYo: $('tileYo'), miNombre: $('miNombre'), miAura: $('miAura'),
   barra: $('barra'), barraCodigo: $('barraCodigo'), btnMic: $('btnMic'),
   btnSiguiente: $('btnSiguiente'), btnSalir: $('btnSalir'),
@@ -35,7 +36,7 @@ const el = {
   rankDonde: $('rankDonde'), tabla: $('tabla'), rankYo: $('rankYo'), rankVolver: $('rankVolver'),
 };
 
-const PANELES = ['intro', 'loading', 'count', 'result', 'oops', 'rank', 'versus'];
+const PANELES = ['intro', 'loading', 'count', 'result', 'oops', 'rank', 'buscando'];
 let panelesArriba = [];
 const show = (...ids) => {
   panelesArriba = ids;
@@ -387,7 +388,11 @@ function arrancarLoop() {
  */
 async function boot(arrancarYa = true) {
   el.go.disabled = true;
-  show('loading');
+  // Con todo ya cargado no se pasa por la pantalla de carga. Al saltar de un
+  // rival al siguiente eso era un parpadeo de "PIDIENDO CÁMARA" sobre una
+  // camara que nunca se apago: mas alarmante que informativo.
+  const camaraViva = stream?.getVideoTracks?.().some((t) => t.readyState === 'live');
+  if (!camaraViva || (!poseWorker && !pose)) show('loading');
   el.loadmsg.textContent = 'PIDIENDO CÁMARA…';
   if (!await asegurarCamara()) return false;
   try {
@@ -739,6 +744,7 @@ let micTrack = null;          // track del microfono, si alguna vez lo dieron
 let micOn = false;
 let arranqueAzar = 0;         // timeout del arranque automatico del 1v1
 let proximaRonda = 0;         // timeout de la ronda siguiente del duelo
+const buscador = new Batalla();   // solo para la cola; la sala usa `batalla`
 const tiles = new Map();      // id -> {caja, video, nombre, aura}
 
 // El duelo al azar es al mejor de tres: el primero que gana DOS se lo lleva y
@@ -1076,6 +1082,11 @@ function salirDeSala({ apagarCamara = false } = {}) {
  * forma mas facil de que el otro se vaya.
  */
 async function entrarASala(codigo, tipo = 'privada') {
+  // Cortar lo que hubiera antes: una ronda a medias, o una sala vieja. Sin
+  // esto, entrar a una sala con una ronda corriendo dejaba las dos cosas
+  // vivas: la ronda terminaba sola despues y cerraba SU resultado sobre una
+  // sala en la que todavia no se habia jugado nada.
+  salirDeSala();
   modo = 'versus';
   tipoSala = tipo;
   marcador = { yo: 0, rival: 0 };
@@ -1099,20 +1110,16 @@ async function entrarASala(codigo, tipo = 'privada') {
     onArranca: () => { if (state === 'idle') empezarRonda(); },
     onEstado: (e) => {
       if (e === 'llena') {
-        el.vsMsg.textContent = 'Esa sala ya está llena. Probá con otro código.';
         salirDeSala({ apagarCamara: true });
-        el.go.disabled = false;
-        show('versus');
+        alMenu('Esa sala ya está llena. Probá con otro código.');
         return;
       }
       // A mitad de ronda NO se corta nada: se termina de jugar y el aura
       // cuenta igual. Cortarla porque se cayo un socket seria castigar al
       // que se quedo.
       if (state === 'running' || state === 'countdown') return;
-      el.vsMsg.textContent = 'Se cortó la conexión con la sala.';
       salirDeSala({ apagarCamara: true });
-      el.go.disabled = false;
-      show('versus');
+      alMenu('Se cortó la conexión con la sala.');
     },
   });
   batalla.entrar(codigo, {
@@ -1126,20 +1133,29 @@ async function entrarASala(codigo, tipo = 'privada') {
   arrancarLoop();       // verse la cara mientras se espera, como en una call
 }
 
+/** Vuelve al menú con el motivo escrito, en vez de dejar la pantalla muda. */
+function alMenu(motivo = '') {
+  el.introMsg.textContent = motivo;
+  el.go.disabled = false;
+  show('intro');
+}
+
 async function buscarYEntrar() {
-  el.vsBuscar.disabled = true;
-  el.vsMsg.textContent = 'Buscando rival…';
+  // La camara y el modelo se cargan ANTES de entrar a la cola. Pedir permiso
+  // de camara con un rival ya esperando del otro lado es la forma mas facil
+  // de que el otro se canse y se vaya.
+  if (!await boot(false)) return;
+  el.buscMsg.textContent = 'Emparejando…';
+  show('buscando');
   try {
     // La cola solo reparte el codigo; despues los dos entran a la misma sala
     // por el mismo camino que los amigos, con cupo de dos. Una sola
     // implementacion de sala en vez de dos que hay que mantener sincronizadas.
-    const codigo = await new Batalla().buscarRival();
+    const codigo = await buscador.buscarRival();
     await entrarASala(codigo, 'azar');
   } catch (e) {
-    el.vsMsg.textContent = `${e.message}. Probá de nuevo o armá una sala con código.`;
-    show('versus');
-  } finally {
-    el.vsBuscar.disabled = false;
+    if (e.message === CANCELADO) return;      // se salió a propósito
+    alMenu(`${e.message}. Probá de nuevo o armá una sala con código.`);
   }
 }
 
@@ -1148,34 +1164,34 @@ async function siguienteRival() {
   // La camara queda prendida a proposito: se reusa para la sala siguiente y
   // el corte se siente instantaneo en vez de meter otro "pidiendo cámara".
   salirDeSala();
-  show('versus');
   await buscarYEntrar();
 }
 
-el.irVersus?.addEventListener('click', () => {
+el.irAzar?.addEventListener('click', () => { startPrefetch(); buscarYEntrar(); });
+el.irCrear?.addEventListener('click', () => {
   startPrefetch();
-  el.vsMsg.textContent = '';
-  el.vsCodigo.value = '';
-  show('versus');
+  el.introMsg.textContent = '';
+  entrarASala(codigoNuevo(), 'privada');
 });
-el.vsVolver?.addEventListener('click', () => {
-  salirDeSala({ apagarCamara: true });
-  el.go.disabled = false;
-  show('intro');
-});
-el.vsCrear?.addEventListener('click', () => entrarASala(codigoNuevo(), 'privada'));
 el.vsEntrar?.addEventListener('click', () => {
   const c = el.vsCodigo.value.trim().toUpperCase();
-  if (!codigoValido(c)) { el.vsMsg.textContent = 'El código son 4 letras o números.'; return; }
+  if (!codigoValido(c)) { el.introMsg.textContent = 'El código son 4 letras o números.'; return; }
+  el.introMsg.textContent = '';
+  startPrefetch();
   entrarASala(c, 'privada');
 });
-el.vsBuscar?.addEventListener('click', buscarYEntrar);
+// El teclado del teléfono muestra "ir" y hay que poder usarlo.
+el.vsCodigo?.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') el.vsEntrar.click(); });
+el.buscCancelar?.addEventListener('click', () => {
+  buscador.cancelarBusqueda();
+  salirDeSala({ apagarCamara: true });   // la cámara se abrió para la cola
+  alMenu();
+});
 
 // --- barra de la sala ---
 el.btnSalir?.addEventListener('click', () => {
   salirDeSala({ apagarCamara: true });
-  el.go.disabled = false;
-  show('versus');
+  alMenu();
 });
 el.btnSiguiente?.addEventListener('click', siguienteRival);
 el.btnMic?.addEventListener('click', alternarMicro);
@@ -1197,13 +1213,19 @@ el.lobbyCodigo?.addEventListener('click', () => copiarCodigo(el.lobbyCodigo));
 // --- salidas del resultado ---
 el.nextRival?.addEventListener('click', siguienteRival);
 el.backSala?.addEventListener('click', () => {
-  if (!batalla?.vivo) { show('versus'); return; }
+  if (!batalla?.vivo) { alMenu('La sala se cerró.'); return; }
   batalla.limpiarRonda();
   show();
   pintarSala();
   arrancarLoop();
 });
-if (hayVersus()) el.irVersus?.classList.remove('hidden');
+// Sin backend configurado no hay batalla: los accesos ni aparecen, en vez de
+// ofrecer algo que va a fallar.
+if (hayVersus()) {
+  el.irAzar?.classList.remove('hidden');
+  el.irCrear?.classList.remove('hidden');
+  el.filaCodigo?.classList.remove('hidden');
+}
 
 // ---------- torneo ----------
 let ultimaPartida = null;     // {aura, moves} de la ronda recien cerrada

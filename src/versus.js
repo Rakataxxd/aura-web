@@ -24,6 +24,9 @@ export const hayVersus = () => !!HTTP;
 
 export const TOPE_SALA = 6;
 
+/** Motivo de rechazo cuando la busqueda la corto el propio jugador. */
+export const CANCELADO = 'cancelado';
+
 const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // sin O/0/I/1: se dictan por telefono
 export const codigoValido = (c) => /^[A-Z2-9]{4}$/.test(String(c || '').toUpperCase());
 
@@ -67,6 +70,7 @@ export class Batalla {
   constructor(cb = {}) {
     this.cb = cb;
     this.ws = null;
+    this.cola = null;           // socket de la cola de emparejamiento
     this.pares = new Map();     // id -> par
     this.id = 0;
     this.max = TOPE_SALA;
@@ -99,20 +103,39 @@ export class Batalla {
 
   // ---------- entrar ----------
 
-  /** Cola de desconocidos: devuelve el codigo que reparte el servidor. */
+  /**
+   * Cola de desconocidos: devuelve el codigo que reparte el servidor.
+   *
+   * El socket se guarda para poder SALIRSE. Esperar en una cola sin boton de
+   * cancelar son noventa segundos de rehen, y el unico escape era recargar.
+   */
   buscarRival() {
+    this.cancelarBusqueda();
     return new Promise((res, rej) => {
-      const ws = new WebSocket(`${WS}/api/cola`);
-      const corte = setTimeout(() => { try { ws.close(); } catch { /* ya */ } rej(new Error('nadie apareció')); }, 90000);
+      const ws = this.cola = new WebSocket(`${WS}/api/cola`);
+      let emparejado = false;
+      const corte = setTimeout(() => {
+        rej(new Error('nadie apareció'));
+        this.cancelarBusqueda();
+      }, 90000);
       ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
         if (m.tipo !== 'emparejado') return;
+        emparejado = true;
         clearTimeout(corte);
+        this.cola = null;
         res(m.codigo);
       };
-      ws.onerror = () => { clearTimeout(corte); rej(new Error('no se pudo entrar a la cola')); };
-      ws.onclose = () => clearTimeout(corte);
+      ws.onerror = () => { clearTimeout(corte); if (!emparejado) rej(new Error('no se pudo entrar a la cola')); };
+      // El servidor cierra el socket apenas empareja: ese cierre NO es un
+      // fallo. Cualquier otro si, y ahi el que corta es siempre el de acá.
+      ws.onclose = () => { clearTimeout(corte); if (!emparejado) rej(new Error(CANCELADO)); };
     });
+  }
+
+  cancelarBusqueda() {
+    try { this.cola?.close(); } catch { /* ya */ }
+    this.cola = null;
   }
 
   /** @param {{salida?: MediaStream, alias?: string, max?: number}} opciones */
@@ -354,6 +377,7 @@ export class Batalla {
 
   cerrar() {
     this.vivo = false;
+    this.cancelarBusqueda();
     for (const p of this.pares.values()) { try { p.pc?.close(); } catch { /* ya */ } }
     this.pares.clear();
     try { this.ws?.close(); } catch { /* ya */ }

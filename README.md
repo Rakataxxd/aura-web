@@ -188,7 +188,9 @@ await m.run(15, { versus: true, live: false, stopFrac: 0.5, poster: true })
 
 15 segundos, gana el que junte más aura. Dos formas de entrar:
 
-- **BUSCAR RIVAL** te mete en una cola con desconocidos y arma un **duelo al mejor de tres** que arranca solo.
+Los cuatro modos están **en la portada**, uno al lado del otro: escanear solo, buscar rival, crear sala y el campo de código. Antes había un menú intermedio de "BATALLA ONLINE" y todo lo online quedaba escondido un toque más adentro, que es un toque de más para lo que hace crecer la app.
+
+- **BUSCAR RIVAL** te mete en una cola con desconocidos y arma un **duelo al mejor de tres** que arranca solo. La cámara y el modelo se cargan **antes** de entrar a la cola: pedir permiso de cámara con un rival ya esperando del otro lado es la forma más fácil de que el otro se canse y se vaya. La espera tiene su propia pantalla, con **CANCELAR** — sin eso eran noventa segundos de rehén y el único escape era recargar.
 - **CREAR SALA** te da un código de 4 caracteres para dictarle a quien quieras: ahí entran **hasta 6** y la ronda la larga el anfitrión desde el lobby. El alfabeto de los códigos no tiene `O`, `0`, `I` ni `1`, justamente porque se dictan por teléfono.
 
 Se ve como una videollamada: un recuadro por persona, el propio siempre primero (a la izquierda en pantalla ancha, arriba en un teléfono parado). El **micrófono arranca apagado** y se prende desde la barra.
