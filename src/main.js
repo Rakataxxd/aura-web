@@ -1543,16 +1543,27 @@ let ultimoOnline = 0;
 
 const cuantos = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
 
+// SE LLAMA USUARIOS ACTIVOS Y SE ESCRIBE ASI, EN LAS DOS PANTALLAS.
+//
+// Antes cada una lo decia a su manera —"personas escaneando" en la portada,
+// "personas en el escáner" en la espera— y encima la portada le restaba uno
+// para no contarte a vos. Tres nombres y dos numeros distintos para UNA sola
+// cosa: el mismo dato que el panel de /admin llama "personas activas en los
+// últimos 10 minutos". Ahora es el numero crudo, con su nombre, en todos lados.
+const activos = (n) => cuantos(n, 'USUARIO ACTIVO', 'USUARIOS ACTIVOS');
+
 function pintarOnline(d) {
   if (!d || !el.online) return;         // se cayo el pedido: se deja lo de antes
-  const otros = Math.max(0, d.jugando - 1);   // sin contarme a mi
   el.online.classList.remove('hidden');
-  el.online.classList.toggle('vacio', d.cola === 0);
+  el.online.classList.toggle('vacio', d.jugando <= 1);
+  // La cola va detras y solo si hay alguien: es el dato que decide si tocar
+  // "BUSCAR RIVAL" tiene sentido, pero sin nadie esperando la linea se llena de
+  // ceros y el consejo sirve mas que el numero.
   el.online.textContent = d.cola > 0
-    ? `${cuantos(d.cola, 'persona buscando rival', 'personas buscando rival')} ahora mismo.`
-    : otros > 0
-      ? `Nadie en la cola. ${cuantos(otros, 'persona escaneando', 'personas escaneando')} igual.`
-      : 'No hay nadie más ahora. Armá una sala y pasá el código.';
+    ? `${activos(d.jugando)} · ${d.cola} buscando rival`
+    : d.jugando > 1
+      ? `${activos(d.jugando)} · nadie en la cola`
+      : `${activos(d.jugando)} · armá una sala y pasá el código`;
 }
 
 /**
@@ -1560,18 +1571,15 @@ function pintarOnline(d) {
  *
  * Acá el número de la cola no se repite: ese lo escribe `buscMsg` y es exacto
  * (lo avisa el servidor por el mismo socket cada vez que cambia). Lo que falta
- * mientras gira el spinner es lo otro: cuánta gente hay en la página. Noventa
- * segundos de espera se aguantan sabiendo que hay veinte personas escaneando y
- * no se aguantan ni diez si uno sospecha que no hay nadie.
+ * mientras gira el spinner son los usuarios activos. Noventa segundos de espera
+ * se aguantan sabiendo que hay veinte del otro lado y no se aguantan ni diez si
+ * uno sospecha que no hay nadie.
  */
 function pintarBuscando(d) {
   if (!d || !el.buscOnline) return;
-  const solo = d.jugando <= 1;
   el.buscOnline.classList.remove('hidden');
-  el.buscOnline.classList.toggle('vacio', solo);
-  el.buscOnline.textContent = solo
-    ? 'No hay nadie más en el escáner ahora mismo.'
-    : `${cuantos(d.jugando, 'persona', 'personas')} en el escáner ahora mismo.`;
+  el.buscOnline.classList.toggle('vacio', d.jugando <= 1);
+  el.buscOnline.textContent = activos(d.jugando);
 }
 
 /** ¿Alguna de las dos pantallas que muestran el número está a la vista? */
