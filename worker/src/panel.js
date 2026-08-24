@@ -44,6 +44,7 @@ export const PANEL = `<!doctype html>
   .caja span { display: block; font-size: 11px; letter-spacing: .12em; opacity: .45; }
   .caja b { font-size: 25px; font-weight: 400; color: var(--acido); }
   .caja em { font-style: normal; opacity: .4; font-size: 11px; }
+  .nota { font-size: 11px; opacity: .4; margin: 9px 0 0; max-width: 70ch; line-height: 1.6; }
 
   .barras { display: flex; align-items: flex-end; gap: 4px; height: 130px; }
   /* El tope de ancho es para los primeros dias: con una sola barra a flex:1 el
@@ -142,6 +143,30 @@ function seccion(titulo) {
   return h;
 }
 
+/** Aclaración al pie de una sección: lo que el número NO dice. */
+function nota(texto) {
+  const p = document.createElement('p');
+  p.className = 'nota';
+  p.textContent = texto;
+  $('todo').appendChild(p);
+}
+
+/** Una fila de cajas [rótulo, número, pie]. El pie es opcional. */
+function tarjetas(lista) {
+  const caja = document.createElement('div');
+  caja.className = 'cajas';
+  for (const [k, v, pie] of lista) {
+    const c = document.createElement('div');
+    c.className = 'caja';
+    const s = document.createElement('span'); s.textContent = k;
+    const n = document.createElement('b'); n.textContent = num(v);
+    c.append(s, n);
+    if (pie) { const e = document.createElement('em'); e.textContent = ' ' + pie; c.appendChild(e); }
+    caja.appendChild(c);
+  }
+  return caja;
+}
+
 function pintar(d) {
   $('todo').textContent = '';
 
@@ -169,52 +194,44 @@ function pintar(d) {
   const hoy = d.dias[0] || {};
   const sem = d.dias.slice(0, 7);
   const suma = (k) => sem.reduce((a, x) => a + Number(x[k] || 0), 0);
-
-  seccion('HOY (' + (hoy.dia || '—') + ')');
-  const cajas = document.createElement('div');
-  cajas.className = 'cajas';
-  const tHoy = (d.torneo || []).find((x) => x.dia === hoy.dia) || {};
   const pct = (parte, todo) => (todo > 0 ? Math.round(parte / todo * 100) + '%' : '—');
-  const datos = [
-    ['PERSONAS', hoy.gente, 'únicas'],
-    ['ABIERTAS', hoy.visitas, 'sesiones'],
+
+  // LA PREGUNTA. Cuánta gente entró, en los cuatro rangos, arriba de todo y
+  // sin tener que sumar nada a mano. Todo lo demás del panel es el detalle.
+  const rango = (n) => d.dias.slice(0, n).reduce(
+    (a, x) => ({ gente: a.gente + Number(x.gente || 0), visitas: a.visitas + Number(x.visitas || 0) }),
+    { gente: 0, visitas: 0 },
+  );
+  const r1 = rango(1), r7 = rango(7), r30 = rango(30);
+  seccion('CUÁNTA GENTE ENTRÓ');
+  $('todo').appendChild(tarjetas([
+    ['HOY', r1.gente, num(r1.visitas) + ' sesiones'],
+    ['7 DÍAS', r7.gente, num(r7.visitas) + ' sesiones'],
+    ['30 DÍAS', r30.gente, num(r30.visitas) + ' sesiones'],
+    ['HISTÓRICO', d.total.gente, num(d.total.visitas) + ' sesiones'],
+  ]));
+  nota('Personas = los únicos de cada día, sumados. Quien vuelve OTRO día cuenta otra vez: '
+    + 'el identificador se renueva cada medianoche justamente para no poder seguir a nadie, '
+    + 'así que el número real está entre ese y el del día más alto. Las sesiones sí son exactas.');
+
+  const tHoy = (d.torneo || []).find((x) => x.dia === hoy.dia) || {};
+  seccion('QUÉ HICIERON HOY (' + (hoy.dia || '—') + ')');
+  $('todo').appendChild(tarjetas([
     ['VUELVEN', hoy.vuelven, pct(hoy.vuelven, hoy.visitas) + ' de las sesiones'],
     ['ESCANEOS', hoy.escaneos, 'rondas'],
     ['CLIPS', hoy.clips, 'bajados'],
     ['SALAS', hoy.salas, 'entradas'],
     ['TORNEO', tHoy.jugadores, num(tHoy.partidas || 0) + ' partidas'],
-  ];
-  for (const [k, v, pie] of datos) {
-    const c = document.createElement('div');
-    c.className = 'caja';
-    const s = document.createElement('span'); s.textContent = k;
-    const n = document.createElement('b'); n.textContent = num(v);
-    const e = document.createElement('em'); e.textContent = ' ' + pie;
-    c.append(s, n, e);
-    cajas.appendChild(c);
-  }
-  $('todo').appendChild(cajas);
+  ]));
 
   seccion('ÚLTIMOS 7 DÍAS');
-  const c7 = document.createElement('div');
-  c7.className = 'cajas';
-  for (const [k, v, pie] of [
-    ['PERSONAS', suma('gente'), 'suma de días'],
-    ['ABIERTAS', suma('visitas'), 'sesiones'],
+  $('todo').appendChild(tarjetas([
     ['VUELVEN', suma('vuelven'), pct(suma('vuelven'), suma('visitas')) + ' de las sesiones'],
     ['ESCANEOS', suma('escaneos'), 'rondas'],
     ['CLIPS', suma('clips'), 'bajados'],
+    ['SALAS', suma('salas'), 'entradas'],
     ['PICO', Math.max(...(d.picos || []).slice(0, 7).map((x) => x.pico), 0), 'juntos a la vez'],
-  ]) {
-    const c = document.createElement('div');
-    c.className = 'caja';
-    const s = document.createElement('span'); s.textContent = k;
-    const n = document.createElement('b'); n.textContent = num(v);
-    const e = document.createElement('em'); e.textContent = ' ' + pie;
-    c.append(s, n, e);
-    c7.appendChild(c);
-  }
-  $('todo').appendChild(c7);
+  ]));
 
   // Personas por dia. Sumar los "unicos" de varios dias NO da los unicos del
   // periodo —el que vuelve manana se cuenta dos veces— y no hay forma de que
@@ -293,30 +310,12 @@ function pintar(d) {
   }
   $('todo').appendChild(td);
 
-  // ACUMULADO. "personas" es la SUMA DE LOS ÚNICOS DE CADA DÍA y por eso dice
-  // eso y no "personas distintas": el que vuelve mañana cuenta dos veces. No
-  // hay forma de dar el número real — el hash del visitante cambia todas las
-  // noches, que es justamente lo que hace que esto no rastree a nadie. Para
-  // saber cuántos vuelven está la otra columna, que la marca el teléfono.
-  seccion('ACUMULADO (DESDE ' + (d.total.desde ? new Date(d.total.desde).toISOString().slice(0, 10) : '—') + ')');
-  const ac = document.createElement('div');
-  ac.className = 'cajas';
-  const picoMax = Math.max(...(d.picos || []).map((x) => x.pico), 0);
-  for (const [k, v, pie] of [
-    ['PERSONAS', d.total.gente, 'suma de días, con repetidos'],
-    ['SESIONES', d.total.visitas, 'aperturas'],
+  seccion('HISTÓRICO (DESDE ' + (d.total.desde ? new Date(d.total.desde).toISOString().slice(0, 10) : '—') + ')');
+  $('todo').appendChild(tarjetas([
     ['VUELVEN', d.total.vuelven, pct(d.total.vuelven, d.total.visitas) + ' de las sesiones'],
-    ['RÉCORD', picoMax, 'juntos a la vez'],
-  ]) {
-    const c = document.createElement('div');
-    c.className = 'caja';
-    const s = document.createElement('span'); s.textContent = k;
-    const n = document.createElement('b'); n.textContent = num(v);
-    const e = document.createElement('em'); e.textContent = ' ' + pie;
-    c.append(s, n, e);
-    ac.appendChild(c);
-  }
-  $('todo').appendChild(ac);
+    ['RÉCORD', Math.max(...(d.picos || []).map((x) => x.pico), 0), 'juntos a la vez'],
+    ['EVENTOS', d.total.eventos, 'guardados'],
+  ]));
 
   $('sub').textContent = num(d.total.eventos) + ' eventos guardados · actualizado ' +
     new Date().toLocaleTimeString('es-GT');
