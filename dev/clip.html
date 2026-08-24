@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8" /><title>mosaico</title>
+<style>body{background:#111;margin:0;padding:12px;color:#eee;font:12px monospace}#dst{width:960px;display:block;border:1px solid #444}</style>
+</head>
+<body>
+<canvas id="dst"></canvas>
+<pre id="log"></pre>
+<script type="module">
+import { Mosaico } from '/src/mosaico.js';
+
+// Fuentes falsas: una vertical de teléfono (con "techo" arriba) y tres apaisadas.
+function fuente(w, h, color, etiqueta) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.fillStyle = color; x.fillRect(0, 0, w, h);
+  x.fillStyle = '#6b4a2a'; x.fillRect(0, 0, w, h * 0.45);      // "techo"
+  x.fillStyle = '#000'; x.font = `bold ${Math.round(h / 8)}px sans-serif`;
+  x.textAlign = 'center';
+  x.fillText(etiqueta, w / 2, h * 0.75);
+  x.strokeStyle = '#000'; x.lineWidth = 8; x.strokeRect(4, 4, w - 8, h - 8);
+  return c;
+}
+
+const fuentes = [
+  { fuente: fuente(720, 1280, '#c9ff2e', 'YO'), alias: 'Ricargog', aura: 201569, yo: true, mudo: false },
+  { fuente: fuente(720, 1280, '#8ecfff', 'CEL'), alias: 'EL DEL CELULAR', aura: 71274, yo: false, mudo: true },
+  { fuente: fuente(1280, 720, '#ff8ec5', 'PC1'), alias: 'INVITADO', aura: 183347, yo: false, mudo: false },
+  { fuente: fuente(1280, 720, '#ffd58e', 'PC2'), alias: 'INVITADO', aura: 178483, yo: false, mudo: false },
+];
+
+const m = new Mosaico(1280, 720);
+const log = [];
+m.dibujar(fuentes);                       // el primero calienta fuentes y shaders
+await new Promise((r) => setTimeout(r, 60));
+const t0 = performance.now();
+const uno = m.dibujar(fuentes);
+const costo = performance.now() - t0;
+const dos = m.dibujar(fuentes);           // pegado: lo tiene que rechazar
+log.push(`dibujo: ${uno} (${costo.toFixed(1)} ms)`);
+log.push(`inmediato, debe ser false: ${dos}`);
+await new Promise((r) => setTimeout(r, 60));
+log.push('tras 60ms, debe ser true: ' + m.dibujar(fuentes));
+
+// A 30fps sostenidos, cuántos cuadros deja pasar en medio segundo (esperado ~15)
+let n = 0;
+const hasta = performance.now() + 500;
+while (performance.now() < hasta) { if (m.dibujar(fuentes)) n++; }
+log.push(`cuadros en 500ms: ${n} (esperado ~15)`);
+
+const dst = document.getElementById('dst');
+dst.width = m.canvas.width; dst.height = m.canvas.height;
+dst.getContext('2d').drawImage(m.canvas, 0, 0);
+
+// --- el clip de verdad: Recorder sobre este lienzo, con audio mezclado ---
+const { Recorder } = await import('/src/record.js');
+
+// Dos "micrófonos": el mío y el de un rival.
+function tono(hz) {
+  const ac = new AudioContext();
+  const osc = ac.createOscillator();
+  osc.frequency.value = hz;
+  const d = ac.createMediaStreamDestination();
+  osc.connect(d); osc.start();
+  return d.stream.getAudioTracks()[0];
+}
+
+const rec = new Recorder(m.canvas);
+log.push('mime elegido: ' + rec.mime);
+log.push('arrancó: ' + rec.start(30, [tono(440), tono(660)]));
+log.push('pistas en el stream: ' + rec.stream.getTracks().map((t) => t.kind).join('+'));
+
+const fin = performance.now() + 1500;
+await new Promise((r) => {
+  const paso = () => {
+    m.dibujar(fuentes);
+    if (performance.now() < fin) requestAnimationFrame(paso); else r();
+  };
+  paso();
+});
+const blob = await rec.stop();
+log.push(`clip: ${blob.type} · ${(blob.size / 1024).toFixed(0)} KB`);
+log.push('audio cerrado: ' + (rec.mezcla === null));
+
+const v = document.createElement('video');
+v.controls = true; v.style.width = '480px';
+v.src = URL.createObjectURL(blob);
+document.body.appendChild(v);
+await new Promise((r) => { v.onloadedmetadata = r; v.onerror = r; setTimeout(r, 3000); });
+log.push(`reproducible: ${v.videoWidth}x${v.videoHeight} · ${v.duration.toFixed(2)}s`);
+
+document.getElementById('log').textContent = log.join('\n');
+</script>
+</body>
+</html>

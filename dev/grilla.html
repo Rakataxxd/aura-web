@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8" /><title>tiles</title></head>
+<body>
+<div id="stage" style="position:relative;width:929px;height:520px">
+  <div id="tiles" class="sala">
+    <div class="tile yo"><canvas id="view" width="960" height="540"></canvas>
+      <span class="tile-nombre">VOS</span><span class="tile-aura">0</span></div>
+  </div>
+</div>
+<pre id="log" style="font:12px monospace;color:#eee;position:relative;z-index:5"></pre>
+<script type="module">
+import '/src/style.css';
+import { debeContener } from '/src/mosaico.js';
+
+const tiles = document.getElementById('tiles');
+
+function video(w, h, arriba, abajo) {
+  const caja = document.createElement('div');
+  caja.className = 'tile';
+  const v = document.createElement('video');
+  v.autoplay = true; v.muted = true; v.playsInline = true;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  const pintar = () => {
+    x.fillStyle = arriba; x.fillRect(0, 0, w, h * 0.44);
+    x.fillStyle = abajo; x.fillRect(0, h * 0.44, w, h * 0.56);
+    requestAnimationFrame(pintar);
+  };
+  pintar();
+  v.srcObject = c.captureStream(30);
+  const n = document.createElement('span');
+  n.className = 'tile-nombre'; n.textContent = `${w}x${h}`;
+  const a = document.createElement('span');
+  a.className = 'tile-aura'; a.textContent = '71,274';
+  caja.append(v, n, a);
+  tiles.appendChild(caja);
+  return { caja, v };
+}
+
+// El del celular (vertical) y dos de computadora.
+const cel = video(720, 1280, '#6b4a2a', '#2a6b4a');
+const pc1 = video(1280, 720, '#7a3a5a', '#3a7a5a');
+const pc2 = video(1280, 720, '#3a4a7a', '#7a6a3a');
+
+// Lo mismo que hace acomodarTiles(): elegir columnas, limitar la proporción.
+const AR_TILE = 4 / 3, AR_MAX = 16 / 9, hueco = 8;
+const n = tiles.children.length;
+const W = tiles.clientWidth, H = tiles.clientHeight;
+let mejor = { w: W, h: H, util: -1 };
+for (let cols = 1; cols <= n; cols++) {
+  const filas = Math.ceil(n / cols);
+  const w = (W - hueco * (cols - 1)) / cols, h = (H - hueco * (filas - 1)) / filas;
+  if (w <= 0 || h <= 0) continue;
+  const util = Math.min(w, h * AR_TILE) * Math.min(w / AR_TILE, h);
+  if (util > mejor.util) mejor = { w, h, util };
+}
+let { w, h } = mejor;
+if (w / h > AR_MAX) w = h * AR_MAX; else if (h / w > AR_MAX) h = w * AR_MAX;
+tiles.style.setProperty('--tw', `${Math.floor(w)}px`);
+tiles.style.setProperty('--th', `${Math.floor(h)}px`);
+
+// Esperar a los cuadros, no a un timeout: sin foco la pestaña arranca lenta y
+// el test medía videos de 0x0.
+const listos = [cel, pc1, pc2].map(({ v }) => new Promise((r) => {
+  if (v.videoWidth) return r();
+  v.addEventListener('loadeddata', r, { once: true });
+  setTimeout(r, 8000);
+}));
+await Promise.all(listos);
+
+const log = [];
+for (const t of tiles.querySelectorAll('.tile')) {
+  const v = t.querySelector('video');
+  if (!v) continue;
+  const rt = t.getBoundingClientRect(), rv = v.getBoundingClientRect();
+  if (v.videoWidth) v.classList.toggle('contener', debeContener(v.videoWidth / v.videoHeight, rt.width / rt.height));
+  const cabe = Math.abs(rv.width - rt.width) < 6 && Math.abs(rv.height - rt.height) < 6;
+  log.push(`${v.videoWidth}x${v.videoHeight} → recuadro ${Math.round(rt.width)}x${Math.round(rt.height)}`
+    + ` · caja del video ${Math.round(rv.width)}x${Math.round(rv.height)}`
+    + ` · ${getComputedStyle(v).objectFit} · ${cabe ? 'ENCAJA' : 'SE DESBORDA ✗'}`);
+}
+document.getElementById('log').textContent = log.join('\n');
+</script>
+</body>
+</html>
