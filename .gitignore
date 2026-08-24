@@ -9,6 +9,9 @@ public/testdata
 # worker de Cloudflare
 worker/.wrangler
 worker/node_modules
+# secretos locales del worker (ADMIN_CLAVE, SAL_VISITANTE). En produccion van
+# con `wrangler secret put`, nunca en el repo.
+worker/.dev.vars
 
 # override local del backend (.env SI se versiona: la URL no es secreta
 # y sin ella el build sale sin ranking sin avisar)

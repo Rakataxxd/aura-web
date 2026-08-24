@@ -12,10 +12,16 @@
 //   GET  /api/ranking?ambito=global|pais|region&periodo=dia|semana|historico
 //                     [&alias=x] [&limite=50]
 //   GET  /api/salud
+//   GET  /api/online   -> {jugando, cola}      cuanta gente hay del otro lado
+//   POST /api/hit      {tipo, ref}             analitica, ver analitica.js
+//   GET  /api/admin/stats                      privado, header x-clave
+//   GET  /admin                                el panel que lee eso
 //   WS   /api/cola                              cola de desconocidos (1v1)
 //   WS   /api/sala?codigo=XXXX[&max=N][&alias=x] sala de hasta 6
 
 import { Sala, Lobby, codigoValido } from './salas.js';
+import { anotar, online, esAdmin, resumen } from './analitica.js';
+import { PANEL } from './panel.js';
 export { Sala, Lobby };
 
 const LIMITE_MAX = 100;
@@ -31,9 +37,14 @@ const json = (data, req, env, status = 200) =>
     headers: { 'content-type': 'application/json; charset=utf-8', ...cors(req, env) },
   });
 
+const origenes = (env) => (env.ORIGENES || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+/** Quien puede pegarle. Se compara EXACTO contra el header Origin. */
+const origenOk = (req, env) => origenes(env).includes(req.headers.get('Origin') || '');
+
 function cors(req, env) {
   const origen = req.headers.get('Origin') || '';
-  const permitidos = (env.ORIGENES || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const permitidos = origenes(env);
   // Sin comodin: `*` con un origen concreto igual funcionaria, pero dejar la
   // lista explicita es lo que evita que cualquier pagina escriba puntajes.
   const ok = permitidos.includes(origen);
@@ -117,20 +128,32 @@ async function puestoDe(env, f, aliasKey) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
 
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(req, env) });
     if (url.pathname === '/api/salud') return json({ ok: true }, req, env);
+
+    // El panel se sirve sin clave porque sin clave no trae ningun dato: lo que
+    // se pide con la clave es /api/admin/stats, y eso pasa por `esAdmin`.
+    if (url.pathname === '/admin') {
+      return new Response(PANEL, {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'x-robots-tag': 'noindex' },
+      });
+    }
+    if (url.pathname === '/api/admin/stats') {
+      if (!esAdmin(req, env)) return new Response('no', { status: 401 });
+      return new Response(JSON.stringify(await resumen(env)), {
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }
 
     // --- batalla online ---
     // Los WebSocket NO pasan por `cors()`: el navegador no aplica CORS al
     // handshake de un WebSocket, asi que el chequeo se hace a mano contra el
     // header Origin. Sin esto cualquier pagina podria abrir salas.
     if (url.pathname === '/api/sala' || url.pathname === '/api/cola') {
-      const origen = req.headers.get('Origin') || '';
-      const permitidos = (env.ORIGENES || '').split(',').map((s) => s.trim()).filter(Boolean);
-      if (!permitidos.includes(origen)) return new Response('origen no permitido', { status: 403 });
+      if (!origenOk(req, env)) return new Response('origen no permitido', { status: 403 });
 
       if (url.pathname === '/api/cola') {
         return env.LOBBY.get(env.LOBBY.idFromName('cola')).fetch(req);
@@ -148,6 +171,27 @@ export default {
     const hoy = periodos(Date.now());
 
     try {
+      // Analitica. Contesta ANTES de escribir: el cliente la manda y se
+      // olvida, y ni el `visita` de la primera pantalla tiene por que hacerle
+      // esperar un round trip a nadie. Si la escritura falla, se pierde un
+      // evento y no se entera nadie, que es exactamente lo que corresponde.
+      if (url.pathname === '/api/hit' && req.method === 'POST') {
+        if (origenOk(req, env)) {
+          // El cuerpo se lee ACA y no adentro de `anotar`: una vez devuelta la
+          // respuesta, el stream del request ya no se puede leer. Lo unico que
+          // queda para despues es el INSERT.
+          const cuerpo = await req.text();
+          ctx.waitUntil(anotar(req, env, { pais, region, hoy, cuerpo }).catch((e) => {
+            console.warn('[hit]', e?.message);
+          }));
+        }
+        return new Response(null, { status: 204, headers: cors(req, env) });
+      }
+
+      if (url.pathname === '/api/online') {
+        return json(await online(env), req, env);
+      }
+
       if (url.pathname === '/api/score' && req.method === 'POST') {
         const body = await req.json().catch(() => null);
         if (!body) return json({ error: 'cuerpo invalido' }, req, env, 400);

@@ -151,22 +151,50 @@ export class Lobby {
     this.esperando = [];    // websockets en cola, en orden de llegada
   }
 
+  /**
+   * Un socket que se murio sin avisar —pestaña cerrada de golpe, telefono que
+   * se durmio— dejaba a la siguiente persona emparejada con un fantasma. Se
+   * barre antes de tocar la cola para cualquier cosa.
+   */
+  limpiar() {
+    this.esperando = this.esperando.filter((ws) => ws.readyState === WebSocket.READY_STATE_OPEN);
+    return this.esperando.length;
+  }
+
+  /**
+   * Le dice a cada uno cuantos hay y cuantos tiene adelante.
+   *
+   * Se AVISA, no se pregunta: los que esperan ya tienen el socket abierto, asi
+   * que el numero les llega solo cuando cambia y nadie tiene que estar
+   * preguntando cada dos segundos. Esperar en una cola sin saber si hay
+   * alguien mas es lo que hace que la gente se vaya a los diez segundos.
+   */
+  avisar() {
+    const total = this.esperando.length;
+    this.esperando.forEach((ws, i) => {
+      try { ws.send(JSON.stringify({ tipo: 'en-cola', delante: i, esperando: total })); } catch { /* se fue */ }
+    });
+  }
+
   async fetch(req) {
+    // El menu pregunta por HTTP comun cuantos hay buscando rival. Es el mismo
+    // objeto que tiene la cola en memoria, o sea que el numero es exacto y no
+    // cuesta ni una consulta a la base.
+    if (new URL(req.url).pathname === '/cuantos') {
+      return Response.json({ cola: this.limpiar() });
+    }
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('esperaba websocket', { status: 426 });
     const { 0: cliente, 1: server } = new WebSocketPair();
     server.accept();
 
     const sacar = () => {
       const i = this.esperando.indexOf(server);
-      if (i >= 0) this.esperando.splice(i, 1);
+      if (i >= 0) { this.esperando.splice(i, 1); this.avisar(); }
     };
     server.addEventListener('close', sacar);
     server.addEventListener('error', sacar);
 
-    // Se limpia la cola antes de emparejar: un socket que se murio sin
-    // avisar (pestaña cerrada de golpe, telefono que se durmio) dejaba a la
-    // siguiente persona emparejada con un fantasma.
-    this.esperando = this.esperando.filter((ws) => ws.readyState === WebSocket.READY_STATE_OPEN);
+    this.limpiar();
 
     const otro = this.esperando.shift();
     if (otro) {
@@ -174,9 +202,10 @@ export class Lobby {
       for (const ws of [otro, server]) {
         try { ws.send(JSON.stringify({ tipo: 'emparejado', codigo })); ws.close(4000, 'emparejado'); } catch { /* se fue */ }
       }
+      this.avisar();
     } else {
       this.esperando.push(server);
-      server.send(JSON.stringify({ tipo: 'en-cola', delante: 0 }));
+      this.avisar();
     }
 
     return new Response(null, { status: 101, webSocket: cliente });

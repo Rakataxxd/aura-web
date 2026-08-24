@@ -32,3 +32,32 @@ CREATE INDEX IF NOT EXISTS ix_semana ON runs (semana, aura DESC);
 CREATE INDEX IF NOT EXISTS ix_pais   ON runs (pais, aura DESC);
 CREATE INDEX IF NOT EXISTS ix_region ON runs (pais, region, aura DESC);
 CREATE INDEX IF NOT EXISTS ix_alias  ON runs (alias_key, ts DESC);
+
+-- Analitica. Una fila por cosa que hizo alguien: entro, escaneo, bajo el clip,
+-- entro a una sala. `runs` ya cuenta el torneo, pero solo ve al que ESCRIBE su
+-- nombre y sube el puntaje —una minoria—, asi que no sirve para saber cuanta
+-- gente entra.
+--
+-- QUIEN ES CADA UNO. `visitante` es SHA-256 de (sal secreta + dia + IP + user
+-- agent), cortado a 24 hex. No se guarda la IP en ninguna parte y el hash no
+-- se puede volver atras sin la sal. Como el dia entra en la mezcla, el hash
+-- CAMBIA cada medianoche UTC: se puede contar cuanta gente distinta hubo hoy,
+-- pero no seguir a la misma persona de un dia para el otro. Es a proposito.
+CREATE TABLE IF NOT EXISTS eventos (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  tipo      TEXT    NOT NULL,          -- visita | escaneo | clip | sala
+  visitante TEXT    NOT NULL,          -- hash del dia, ver arriba
+  pais      TEXT    NOT NULL DEFAULT 'XX',
+  region    TEXT    NOT NULL DEFAULT '',
+  ref       TEXT    NOT NULL DEFAULT 'directo',   -- de donde vino (host o ?ref=)
+  dia       TEXT    NOT NULL,          -- YYYY-MM-DD (UTC)
+  semana    TEXT    NOT NULL,          -- YYYY-Www (UTC, ISO)
+  ts        INTEGER NOT NULL           -- epoch ms
+);
+
+-- Mismo criterio que arriba: primero lo que filtra, despues lo que agrupa.
+-- `ix_ev_ts` es el de "cuanta gente hay ahora", que corre cada pocos segundos
+-- y solo mira los ultimos diez minutos.
+CREATE INDEX IF NOT EXISTS ix_ev_dia   ON eventos (dia, tipo);
+CREATE INDEX IF NOT EXISTS ix_ev_ts    ON eventos (ts);
+CREATE INDEX IF NOT EXISTS ix_ev_quien ON eventos (dia, visitante);

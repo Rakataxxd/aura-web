@@ -25,6 +25,24 @@ class_name = "Lobby"
 tag = "v1"
 new_sqlite_classes = ["Sala", "Lobby"]
 
+# SECRETOS (no van acá: `[vars]` se publica en texto plano en el dashboard).
+# Se ponen una vez con:
+#   npx wrangler secret put ADMIN_CLAVE     # la clave del panel de /admin
+#   npx wrangler secret put SAL_VISITANTE   # cualquier cadena larga al azar
+#
+# ADMIN_CLAVE:   sin esto, /api/admin/stats contesta 401 SIEMPRE y el panel no
+#                sirve. Es a proposito: un panel que se abre solo porque nadie
+#                configuro la clave es peor que no tener panel.
+# SAL_VISITANTE: es lo que hace que el hash del visitante no se pueda volver
+#                atras. Sin ella se usa 'sin-sal', que con una tabla de IPs en
+#                la mano es reversible: quien despliegue esto la tiene que
+#                poner. Cambiarla despues no rompe nada, solo corta la
+#                continuidad de "personas unicas" con lo de antes.
+#
+# En local van en `worker/.dev.vars` (ignorado por git), una por linea:
+#   ADMIN_CLAVE="loquesea"
+#   SAL_VISITANTE="otra-cosa-larga"
+
 [vars]
 # Origenes que pueden pegarle. Se compara EXACTO contra el header Origin.
 # Si publicas en otro lado, agregalo aca separado por coma.

@@ -184,6 +184,16 @@ await m.run(15, { versus: true, live: false, stopFrac: 0.5, poster: true })
 
 `poster: true` fuerza el peor caso visual (nombre largo + crítico + frase a la vez) para verificar que nada se desborde en pantalla angosta.
 
+Para lo que es **geometría de la sala** hay dos bancos de prueba que corren con `npm run dev` y no necesitan ni cámara ni rival:
+
+| dónde | qué prueba |
+|---|---|
+| `node -e "import('./src/mosaicotest.js').then(m=>console.log(JSON.stringify(m.run(),null,1)))"` | cómo se reparten N recuadros y cuándo un video entra completo en vez de recortarse |
+| `/aura-web/dev/grilla.html` | la grilla **de verdad**, con videos falsos vertical y apaisado: que la caja de cada `<video>` mida lo mismo que su recuadro |
+| `/aura-web/dev/clip.html` | el mosaico y el grabador: acelerador de 30fps, mezcla de audio, y que el mp4 que sale sea reproducible |
+
+Las dos páginas son solo de desarrollo: no son entradas del build, así que no se publican.
+
 ## Batalla online (rival al azar o sala de hasta 6)
 
 15 segundos, gana el que junte más aura. Dos formas de entrar:
@@ -195,6 +205,17 @@ Los cuatro modos están **en la portada**, uno al lado del otro: escanear solo, 
 
 Se ve como una videollamada: un recuadro por persona, el propio siempre primero (a la izquierda en pantalla ancha, arriba en un teléfono parado). El **micrófono arranca apagado** y se prende desde la barra.
 
+### "Del que estaba en el celular solo se cargaba lo de arriba"
+
+Cuatro personas, tres en computadora y una en teléfono. En el recuadro del teléfono se veía **el techo de su cuarto** y él nunca aparecía. Eran dos bugs encima:
+
+1. **El `<video>` no medía lo que su recuadro.** `.tile` es un grid con `place-items: center`, y un item que no se estira **no resuelve los porcentajes de alto contra su celda**: el `height: 100%` caía a `auto`, o sea al aspecto intrínseco del video. Un 720x1280 dentro de un recuadro de 797x448 se convertía en un elemento de **793x1410 anclado arriba**, y el `overflow: hidden` del recuadro mostraba solo el primer tercio del cuadro. Con un 16:9 el alto automático coincidía con la celda y el bug era invisible — por eso solo le pasaba al del teléfono. Se arregla posicionando el video **absoluto** contra el recuadro, que ya es `position: relative`.
+2. **Y después, `object-fit: cover` recortaba igual.** Con la caja ya del tamaño correcto, un 9:16 dentro de una celda de 1.78:1 se recorta a una banda del 25% del cuadro. `debeContener()` (en `mosaico.js`, compartido con el clip) mide el desajuste real entre las dos proporciones: por encima de 1.35 el video entra **completo**, con franjas negras al costado. Un 16:9 en una celda apaisada sigue llenándola, que se ve mejor.
+
+Aparte, la grilla ya no arma recuadros con forma de franja: `acomodarTiles()` limita la proporción de la celda a **16:9** y deja aire alrededor. Cuatro personas en una pantalla ancha daban celdas de 946x431 (2.19:1), y ahí adentro no entra nadie parado.
+
+La geometría de esto se prueba sin navegador (`node -e "import('./src/mosaicotest.js')..."`), pero el bug de la caja **no lo agarra ningún test de números**: para eso está `dev/grilla.html`, que arma la grilla de verdad con videos falsos de 720x1280 y 1280x720 y verifica que la caja del `<video>` mida lo mismo que su recuadro. `dev/clip.html` hace lo propio con el mosaico y el grabador.
+
 ### El lobby flota, no tapa
 
 El lobby de espera va **encima** de la grilla y no como panel a pantalla completa: media gracia de una sala es ver quién va cayendo mientras esperás, y un panel opaco encima convierte eso en una pantalla de carga. Muestra el código en grande (tocalo y se copia), quiénes están, y el botón de empezar —solo para el anfitrión, deshabilitado con "FALTA GENTE" mientras estés solo—. Desaparece durante la ronda y vuelve al terminar.
@@ -205,7 +226,21 @@ El lobby de espera va **encima** de la grilla y no como panel a pantalla complet
 
 **Una ronda no es el final de nada.** Entre rondas no aparece ni el alta al torneo, ni el clip, ni los botones de salida: eso es el cierre de una partida y la partida sigue. Lo único que se ve es cómo quedó la ronda, el marcador y que viene la siguiente. Al cerrar el duelo la tabla deja de mostrar auras y pasa a mostrar **puntos**, y recién ahí aparecen las dos salidas: **OTRA VEZ** (otro rival en la cola, otro duelo en la sala, otra ronda si venías solo) y **REGRESAR**.
 
-Lo que se sube al torneo y lo que sale en el clip es **tu mejor ronda del duelo**, no la última: una tercera ronda floja te borraba la primera, que era la buena.
+Lo que se sube al torneo y lo que sale en el clip es **tu mejor ronda del duelo**, no la última: una tercera ronda floja te borraba la primera, que era la buena. Las **otras** rondas ya no se tiran: al cerrar el duelo aparece una fila de `RONDA 1 · 2 · 3` para bajarse cualquiera. La que da más risa no siempre es la que dio más aura.
+
+### La repetición de la sala: el clip lleva las cuatro cámaras
+
+En una sala por código, el clip **no** es tu recuadro: es la grilla entera, con todos, sus nombres y su aura, y el audio de la sala mezclado encima. Un archivo con vos solo no es la repetición de nada.
+
+Cómo, en `mosaico.js`: hay un **lienzo aparte** —fijo, del tamaño del archivo que se quiere producir— que copia tu canvas ya dibujado más los `<video>` de los demás. No se dibuja nada dos veces: copiar un canvas o un video a otro canvas es un blit de GPU. El grabador captura **ese** lienzo y no el del juego, así que sigue habiendo una sola `captureStream()` viva por ronda, que es lo único que importa en un teléfono.
+
+Tres decisiones que no son obvias:
+
+- **Se dibuja a 30fps, no a 60.** `captureStream()` muestrea el lienzo cada vez que cambia; dibujar a 60 en una sala de cuatro son cuatro copias de video más por cuadro y el doble de trabajo para el codificador, a cambio de nada — el video que llega de los demás viene a 15-24fps.
+- **Las celdas del clip nunca recortan.** En pantalla los recuadros usan `cover` porque llenar la celda se ve mejor; un archivo que queda guardado para siempre no se puede dar el lujo de cortarle la cabeza a nadie.
+- **El audio se mezcla con WebAudio.** Un `MediaRecorder` acepta *una* pista de audio, no cinco: todos los micrófonos entran a un `MediaStreamDestination` y de ahí sale la única pista que se le agrega al stream del canvas. Si algo de eso falla se graba mudo, que es muchísimo mejor que no grabar.
+
+**Solo en salas por código.** En la cola al azar el de enfrente es un desconocido y su cara no tiene por qué terminar en la galería de nadie: ahí el clip sigue siendo solo tu recuadro, como siempre.
 
 **El marcador no viaja por la red.** Cada uno lo calcula con los números que ya tiene —el `fin` de cada ronda le llega a todos—, así que no hay ningún mensaje de marcador que se pueda perder o desincronizar: si los dos vieron las mismas rondas, los dos llegan al mismo resultado. El empate arriba no le da el punto a nadie: repartirlo permitiría que un duelo de tres rondas terminara con los dos en dos.
 
@@ -232,7 +267,9 @@ El `de` de cada mensaje **lo pone el servidor**, nunca el cliente: si no, cualqu
 
 ### La malla no escala sola: hay que bajarle el bitrate
 
-Seis personas en malla son cinco envíos por cabeza. Sin control, el teléfono se queda sin encoder antes que sin red — y lo primero que se cae es la detección de pose, que *es* el juego. Por eso `presupuesto()` en `versus.js` baja bitrate, fps y resolución de salida a medida que entra gente (700kbps a 1 rival, 180kbps a 5). Un SFU escalaría mucho mejor, pero cuesta plata y hay que mantenerlo.
+Seis personas en malla son cinco envíos por cabeza. Sin control, el teléfono se queda sin encoder antes que sin red — y lo primero que se cae es la detección de pose, que *es* el juego. Por eso `presupuesto()` en `versus.js` baja bitrate, fps y resolución de salida a medida que entra gente (800kbps a 1 rival, 260kbps a 5). Un SFU escalaría mucho mejor, pero cuesta plata y hay que mantenerlo.
+
+Esos números subieron cuando el clip de la sala pasó a grabar **todas** las cámaras: lo que antes era un recuadro de 200px al costado ahora queda guardado en un archivo. A 180kbps con la resolución partida al medio, la repetición de una sala de cuatro no se podía ni mirar.
 
 ### El micrófono no renegocia
 
@@ -247,7 +284,7 @@ Video al azar con desconocidos es el patrón que terminó cerrando Omegle. Lo qu
 - **No es chat abierto.** La sala al azar es de dos y la ronda dura 15 segundos.
 - **SIGUIENTE** está siempre visible en la barra, también a mitad de ronda.
 - **El micrófono arranca apagado**, y al salir de la sala el track se suelta (no queda prendida la lucecita del sistema).
-- **La cara de los demás no entra en tu clip.** Los recuadros ajenos viven en el DOM, no adentro del canvas: `captureStream()` graba el canvas, así que nadie se lleva grabada la cara de un desconocido a la galería.
+- **La cara de un desconocido no entra en tu clip.** El clip de la sala (todas las cámaras) existe **solo en salas por código**, que son las que armás vos con gente que conocés. En la cola al azar se graba únicamente tu recuadro: el lienzo del mosaico ni se crea.
 
 El relay tiene lista blanca de mensajes: lo que no es del protocolo no se reenvía. El handshake del WebSocket valida `Origin` a mano, porque el navegador no le aplica CORS.
 
@@ -304,6 +341,43 @@ cd worker && npx wrangler dev --port 8787 --local
 ### Esquema
 
 Se guarda **una fila por partida**, no una por jugador; el mejor puntaje por alias sale con `MAX() + GROUP BY` al consultar. Es a propósito: una partida de hoy que no supera tu récord histórico igual tiene que poder ganar el ranking del día. Guardando todo, las tres tablas son la misma consulta con otro `WHERE`.
+
+## Cuánta gente entra (analítica privada)
+
+Panel: **`https://aura-ranking.rakataxxd.workers.dev/admin`**, con clave. No lo linkea nada y sin la clave no devuelve un solo número.
+
+GitHub Pages no da un solo log, así que sin esto no hay forma de saber si entraron diez personas o diez mil. `runs` tampoco sirve para eso: solo ve a quien escribe su nombre y sube el puntaje, que son una minoría — el día que el escáner se movió en Instagram, 59 personas se anotaron al torneo y no había manera de saber cuántas habían entrado.
+
+**No se usa Google Analytics ni Plausible ni nada.** El worker ya está desplegado, ya tiene la base y ya sabe el país de cada request: lo único que faltaba era una tabla. Un script de terceros sería un bloqueador de anuncios más en el camino, 20KB más en un teléfono que ya baja 8MB de modelo, y los datos de los que juegan en la casa de otro.
+
+### Cómo se cuenta a una persona sin guardar quién es
+
+`visitante` es `SHA-256(sal secreta + día + IP + user agent)` cortado a 24 hex. **No se guarda la IP en ninguna parte** y el hash no se puede volver atrás sin la sal. Como el día entra en la mezcla, el hash cambia solo cada medianoche UTC: se puede contar cuánta gente distinta hubo hoy y **no** se puede seguir a la misma persona de un día para el otro. Es la idea de Plausible, y es la razón de que sumar los únicos de varios días no dé los únicos del período: el que vuelve mañana se cuenta dos veces.
+
+Se anotan cuatro cosas — `visita`, `escaneo`, `clip`, `sala` — con un tope de 20 por pestaña, y la visita se cuenta una sola vez por sesión (si no, cada "OTRA VEZ" inflaba el número justo el día que importa que sea cierto). El evento va por `POST /api/hit` con el cuerpo en `text/plain`: con `application/json` el navegador manda un `OPTIONS` antes y serían dos requests por evento.
+
+`escaneo` se cuenta al arrancar la cuenta regresiva y no al tocar el botón: entre una cosa y la otra hay un permiso de cámara y 8MB de modelo, y ahí se cae media población. Lo que interesa medir es cuántos llegaron a escanear de verdad.
+
+### Dos secretos
+
+```bash
+cd worker
+npx wrangler secret put ADMIN_CLAVE      # la clave del panel
+npx wrangler secret put SAL_VISITANTE    # la sal del hash; si se cambia, el conteo arranca de cero
+```
+
+La clave se compara en tiempo constante y viaja en el header `x-clave`, no en la URL: un `?clave=` queda escrito en el historial, en los logs y en cualquier captura de pantalla.
+
+## Cuánta gente hay ahora (el número del menú)
+
+Debajo de los botones dice cuántos están buscando rival. Entrar a la cola y esperar noventa segundos a nadie es la forma más rápida de que alguien cierre la página y no vuelva; si no hay nadie, mejor saberlo antes y armar una sala con código.
+
+Son **dos números distintos y salen de dos lados distintos**:
+
+- **la cola** es exacta y la sabe el `Lobby`, que tiene esos sockets conectados. Al que ya está esperando se le **avisa** por el mismo socket cada vez que cambia (`en-cola` lleva `esperando`), así que ahí no hay ni un request de más.
+- **los activos** son los que hicieron algo en los últimos diez minutos, y eso sale de `eventos`. El menú lo pide por `GET /api/online` cada 30s, solo con el menú o la espera a la vista y solo con la pestaña al frente, con 8s de cache en el worker.
+
+Mientras se juega no se pide nada: un request cada medio minuto por cada persona que dejó la página abierta se convierte en el pico de tráfico más grande del día sin que nadie lo mire. Con el plan gratis (100k requests/día en Workers, 100k escrituras/día en D1) eso importa el día que se vuelva a mover.
 
 ## Deploy
 

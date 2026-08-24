@@ -20,9 +20,10 @@
 
     <!-- La grilla de la sala. Mi recuadro es el canvas del juego (con los
          efectos de aura); los de los demas son video crudo.
-         Las caras ajenas viven en el DOM y NO adentro del canvas a proposito:
-         el clip que se descarga graba el canvas, y nadie se lleva grabada la
-         cara de un desconocido a su galeria. -->
+         Las caras ajenas viven en el DOM y NO adentro del canvas: el clip de
+         una sala se arma en un lienzo APARTE (ver mosaico.js) y solo cuando la
+         sala es por codigo. En la cola al azar el de enfrente es un
+         desconocido y su cara no entra en el clip de nadie. -->
     <div id="tiles" class="solo">
       <div class="tile yo" id="tileYo">
         <canvas id="view"></canvas>
@@ -65,6 +66,10 @@
         <button class="btn hidden" id="irCrear">CREAR SALA</button>
         <button class="btn hidden" id="verRank">VER RANKING</button>
       </div>
+      <!-- Cuanta gente hay del otro lado. Va ANTES de tocar "BUSCAR RIVAL":
+           entrar a una cola vacia y esperar noventa segundos a nadie es la
+           forma mas rapida de que alguien cierre la pagina y no vuelva. -->
+      <p class="fine online hidden" id="online"></p>
       <p class="fine alerta" id="introMsg"></p>
       <p class="fine" id="note">El escáner corre en tu teléfono. En batalla, el video va directo al rival.</p>
     </section>
@@ -98,6 +103,14 @@
       <p class="fine" id="altaMsg"></p>
 
       <button class="btn" id="share">DESCARGAR CLIP</button>
+
+      <!-- Las otras rondas del duelo. La que da más risa no siempre es la que
+           dio más aura, así que no se tiran. -->
+      <div class="clips hidden" id="rClips">
+        <p class="fine">LAS DEMÁS RONDAS</p>
+        <div class="clips-fila" id="rClipsFila"></div>
+      </div>
+
       <button class="btn" id="again">OTRA VEZ</button>
       <button class="btn" id="backMenu">REGRESAR</button>
       <p class="fine" id="rNote"></p>
@@ -109,7 +122,14 @@
       <div class="tape">BUSCANDO RIVAL</div>
       <p class="lede">Duelo al mejor de 3<br />contra un desconocido.</p>
       <div class="spinner"></div>
+      <!-- Dos números y no uno: `buscMsg` es la COLA (exacta, la avisa el
+           servidor por el mismo socket) y `buscOnline` es cuánta gente hay en
+           el escáner. Esperar mirando un spinner sin saber si del otro lado
+           hay alguien es lo que hace que se cierre la pestaña a los diez
+           segundos; si la cola está vacía pero hay veinte escaneando, la
+           espera tiene sentido y el mensaje lo tiene que decir. -->
       <p class="fine" id="buscMsg">Emparejando…</p>
+      <p class="fine online hidden" id="buscOnline"></p>
       <button class="btn" id="buscCancelar">CANCELAR</button>
     </section>
 

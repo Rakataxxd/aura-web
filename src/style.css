@@ -201,6 +201,22 @@ h2 {
 }
 .fine.alerta:not(:empty) { color: var(--magenta); }
 
+/* Cuanta gente hay ahora. El punto late para que se lea como un dato en vivo
+   y no como un texto mas de la portada; cuando no hay nadie buscando rival se
+   pone magenta y deja de latir, que es justo la informacion que sirve. */
+.online { display: flex; align-items: center; gap: 8px; opacity: .8; }
+.online::before {
+  content: '';
+  flex: none;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--acid);
+  box-shadow: 0 0 8px var(--acid);
+  animation: latir 2.4s ease-in-out infinite;
+}
+.online.vacio::before { background: var(--magenta); box-shadow: none; animation: none; }
+@keyframes latir { 50% { opacity: .2; } }
+
 .alias {
   font-family: "Chakra Petch", system-ui, sans-serif;
   font-weight: 700;
@@ -303,12 +319,34 @@ h2 {
    vida—, pero al de enfrente hay que verlo como es: espejado, cualquier
    texto en su remera o atras suyo se lee al reves. Cuando el rival era un
    recuadro de 150px no se notaba; a media pantalla, canta. */
+/* EL VIDEO SE POSICIONA, NO SE ESTIRA.
+ *
+ * Con `width/height: 100%` a secas esto estaba roto y no se notaba: `.tile` es
+ * un grid con `place-items: center`, y un item que no se estira NO resuelve
+ * los porcentajes de alto contra su celda — el alto caía a `auto`, o sea al
+ * aspecto intrínseco del video. Un teléfono vertical (720x1280) dentro de un
+ * recuadro de 797x448 se convertía en un elemento de 793x1410 anclado ARRIBA,
+ * y el `overflow: hidden` del recuadro mostraba solo el primer tercio de su
+ * cuadro: el techo de su cuarto, con la persona entera afuera. Con un 16:9 el
+ * alto automático coincidía con la celda y el bug era invisible.
+ *
+ * Absoluto contra el recuadro (que ya es `position: relative`) la caja mide
+ * siempre lo que el recuadro, y recién ahí `object-fit` decide algo. */
 .tile > video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   background: #000;
 }
+/* Un video que no se parece en nada a su recuadro NO se recorta.
+   Con `cover`, un teléfono vertical (9:16) dentro de una celda apaisada deja
+   ver una franja de apenas el 25% del cuadro —en la práctica, el techo de la
+   habitación— y la persona queda entera afuera. Quién entra acá lo decide
+   ajustarEncaje() midiendo el desajuste real, no el CSS: la proporción del
+   video ajeno recién se sabe cuando llega el primer cuadro. */
+.tile > video.contener { object-fit: contain; }
 
 .tile-nombre, .tile-aura {
   position: absolute;
@@ -410,6 +448,12 @@ h2 {
 
 /* La tabla de la sala en el resultado es corta: son seis como mucho. */
 .tabla.sala { max-height: min(30vh, 230px); }
+
+/* Las repeticiones de las otras rondas. Van como `chip` y no como `btn` a
+   propósito: el botón grande es UNO —la mejor ronda, la que se postea— y estas
+   son el cajón de las sobras. Con tres botones iguales no se sabe cuál tocar. */
+.clips { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.clips-fila { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 
 /* ---------- teléfonos ---------- */
 /*

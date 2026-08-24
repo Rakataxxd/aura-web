@@ -51,10 +51,16 @@ const HIELO = [
  * calidad completa y el telefono se queda sin encoder antes que sin red: la
  * deteccion de pose, que es LO QUE HACE AL JUEGO, empieza a perder cuadros.
  */
+// Los números subieron cuando el clip de la sala pasó a grabar las cámaras de
+// TODOS: lo que antes era un recuadro de 200px al costado ahora queda guardado
+// en un archivo de 1280x720. A 180kbps y con la resolución partida al medio,
+// una sala de cuatro daba una repetición que no se podía ni mirar. El techo
+// sigue siendo el encoder del teléfono, no la red: con cinco conexiones esto
+// son ~1.3Mbps de subida, que es lo que hace cualquier videollamada.
 function presupuesto(n) {
-  if (n <= 1) return { bits: 700_000, fps: 30, escala: 1 };
-  if (n <= 3) return { bits: 350_000, fps: 24, escala: 1.5 };
-  return { bits: 180_000, fps: 15, escala: 2 };
+  if (n <= 1) return { bits: 800_000, fps: 30, escala: 1 };
+  if (n <= 3) return { bits: 450_000, fps: 24, escala: 1.25 };
+  return { bits: 260_000, fps: 20, escala: 1.5 };
 }
 
 export class Batalla {
@@ -108,8 +114,13 @@ export class Batalla {
    *
    * El socket se guarda para poder SALIRSE. Esperar en una cola sin boton de
    * cancelar son noventa segundos de rehen, y el unico escape era recargar.
+   *
+   * @param {(cuantos: {delante: number, esperando: number}) => void} [onCola]
+   *   Cuanta gente hay esperando. El servidor lo AVISA cada vez que cambia,
+   *   por el mismo socket: esperar sin saber si hay alguien mas del otro lado
+   *   es lo que hace que la gente se vaya antes de que aparezca nadie.
    */
-  buscarRival() {
+  buscarRival(onCola) {
     this.cancelarBusqueda();
     return new Promise((res, rej) => {
       const ws = this.cola = new WebSocket(`${WS}/api/cola`);
@@ -120,6 +131,10 @@ export class Batalla {
       }, 90000);
       ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
+        if (m.tipo === 'en-cola') {
+          onCola?.({ delante: m.delante || 0, esperando: m.esperando || 1 });
+          return;
+        }
         if (m.tipo !== 'emparejado') return;
         emparejado = true;
         clearTimeout(corte);

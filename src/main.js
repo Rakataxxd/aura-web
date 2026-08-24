@@ -3,11 +3,13 @@ import { createPose, createPoseWorker, openCamera, assignSlots, prefetchAssets, 
 import { Player } from './scoring.js';
 import { Renderer, P_COLOR, GOLD, BONE } from './render.js';
 import { Recorder, shareOrDownload } from './record.js';
+import { Mosaico, debeContener } from './mosaico.js';
 import { detectDap, DAP, brazosCortados } from './moves.js';
 import { toMetric } from './landmarks.js';
 import { verdictFor } from './roasts.js';
 import { hayApi, getAlias, setAlias, aliasValido, enviarPuntaje, traerRanking, nombrePais } from './ranking.js';
 import { Batalla, hayVersus, codigoNuevo, codigoValido, TOPE_SALA, CANCELADO } from './versus.js';
+import { hit, contarVisita, online as pedirOnline } from './analitica.js';
 
 const ROUND_SECONDS = 15;
 const DEBUG = new URLSearchParams(location.search).has('debug');
@@ -20,7 +22,7 @@ const el = {
   rank: $('rank'), buscando: $('buscando'),
   irAzar: $('irAzar'), irCrear: $('irCrear'), filaCodigo: $('filaCodigo'),
   vsCodigo: $('vsCodigo'), vsEntrar: $('vsEntrar'), introMsg: $('introMsg'),
-  buscMsg: $('buscMsg'), buscCancelar: $('buscCancelar'),
+  buscMsg: $('buscMsg'), buscOnline: $('buscOnline'), buscCancelar: $('buscCancelar'),
   tiles: $('tiles'), tileYo: $('tileYo'), miNombre: $('miNombre'), miAura: $('miAura'),
   barra: $('barra'), barraCodigo: $('barraCodigo'), btnMic: $('btnMic'),
   btnSiguiente: $('btnSiguiente'), btnSalir: $('btnSalir'),
@@ -30,8 +32,9 @@ const el = {
   backMenu: $('backMenu'), rSala: $('rSala'), rMarcador: $('rMarcador'),
   countnum: $('countnum'), loadmsg: $('loadmsg'), oopsmsg: $('oopsmsg'),
   rScore: $('rScore'), rTitle: $('rTitle'), rSub: $('rSub'), rStats: $('rStats'), rNote: $('rNote'),
-  rTape: $('rTape'),
+  rTape: $('rTape'), rClips: $('rClips'), rClipsFila: $('rClipsFila'),
   verRank: $('verRank'), alta: $('alta'), alias: $('alias'), subir: $('subir'), altaMsg: $('altaMsg'),
+  online: $('online'),
   tabAmbito: $('tabAmbito'), tabPeriodo: $('tabPeriodo'),
   rankDonde: $('rankDonde'), tabla: $('tabla'), rankYo: $('rankYo'), rankVolver: $('rankVolver'),
 };
@@ -41,6 +44,9 @@ let panelesArriba = [];
 const show = (...ids) => {
   panelesArriba = ids;
   for (const k of PANELES) el[k].classList.toggle('hidden', !ids.includes(k));
+  // Volver al menu es cuando mas importa el numero de gente en la cola: puede
+  // haber entrado alguien mientras jugabas.
+  if (ids.includes('intro')) refrescarOnline();
   // La barra de la sala y la grilla dependen de que haya arriba: un panel
   // opaco la tapa, y si la barra aparece o se va, los recuadros cambian de
   // alto.
@@ -115,6 +121,29 @@ function sizeCanvas() {
 // empataban con dos apiladas y la eleccion salia por redondeo.
 const AR_TILE = 4 / 3;
 
+// Un recuadro no puede ser una franja. Con cuatro personas en una pantalla
+// ancha la grilla salía de 2 columnas y cada celda quedaba de 946x431 —2.2:1—,
+// y ahí adentro un teléfono vertical no se ve: se ve una franja del 25% de su
+// cuadro. Limitar la proporción deja aire a los costados en vez de recortar
+// gente.
+const AR_MAX = 16 / 9;
+
+/**
+ * Recortar o no el video de un recuadro. El criterio está en mosaico.js
+ * (`debeContener`), compartido con el clip; acá solo se miden las cajas.
+ *
+ * Esto es lo que arregla al que jugaba desde el teléfono mientras el resto
+ * estaba en computadora: su cámara vertical dentro de una celda apaisada se
+ * veía como una franja del techo de su cuarto, con él entero afuera.
+ */
+function ajustarEncaje(t) {
+  const v = t.video;
+  const vw = v.videoWidth, vh = v.videoHeight;
+  const r = t.caja.getBoundingClientRect();
+  if (!vw || !vh || !r.width || !r.height) return;
+  v.classList.toggle('contener', debeContener(vw / vh, r.width / r.height));
+}
+
 /**
  * Reparte la pantalla entre los recuadros.
  *
@@ -148,8 +177,19 @@ function acomodarTiles() {
     const util = Math.min(w, h * AR_TILE) * Math.min(w / AR_TILE, h);
     if (util > mejor.util) mejor = { w, h, util };
   }
-  el.tiles.style.setProperty('--tw', `${Math.floor(mejor.w)}px`);
-  el.tiles.style.setProperty('--th', `${Math.floor(mejor.h)}px`);
+  let { w, h } = mejor;
+  // Solo dentro de una sala: jugando solo el recuadro ES la pantalla y el
+  // canvas ya se acomoda adentro con fitCanvasCss().
+  if (enSala) {
+    if (w / h > AR_MAX) w = h * AR_MAX;
+    else if (h / w > AR_MAX) h = w * AR_MAX;
+  }
+  el.tiles.style.setProperty('--tw', `${Math.floor(w)}px`);
+  el.tiles.style.setProperty('--th', `${Math.floor(h)}px`);
+
+  // Cambió el tamaño de las celdas: puede haber cambiado a quién conviene
+  // recortar y a quién no.
+  for (const t of tiles.values()) ajustarEncaje(t);
 
   // Mientras se graba NO se toca el tamaño REAL del canvas: cambiarlo a mitad
   // de grabacion rompe el encoder. Se reacomoda solo el CSS, que es gratis.
@@ -162,6 +202,8 @@ addEventListener('resize', acomodarTiles);
 
 // ---------- estado ----------
 let pose = null, poseWorker = null, stream = null, renderer = null, recorder = null;
+let mosaico = null;           // lienzo del clip de la sala (todas las camaras)
+let clipGrupo = false;        // esta ronda se graba la sala entera, no solo yo
 let players = [new Player(0), new Player(1)];
 let activeCount = 1;
 let state = 'idle';
@@ -426,11 +468,75 @@ async function boot(arrancarYa = true) {
   return true;
 }
 
+// ---------- la repeticion de la sala ----------
+//
+// El clip de una batalla de grupo tiene que tener a TODOS: un recuadro con uno
+// solo no es la repeticion de nada. Se graba un lienzo aparte (ver mosaico.js)
+// que copia mi canvas mas los <video> de los demas, con el audio de la sala
+// mezclado encima.
+//
+// SOLO EN SALAS POR CODIGO. En la cola al azar el de enfrente es un
+// desconocido, y su cara no tiene por que terminar en la galeria de nadie:
+// ahi el clip sigue siendo solo mi recuadro, como siempre.
+
+const FPS_MOSAICO = 30;
+
+function grabarSala() {
+  return modo === 'versus' && tipoSala !== 'azar' && !!batalla && tiles.size > 0;
+}
+
+/**
+ * El lienzo del mosaico, del tamaño que aguante el aparato.
+ *
+ * Se ata a la misma medicion que decide la resolucion del canvas del juego: un
+ * telefono que no llega a 720p dibujando UN recuadro tampoco va a componer
+ * cuatro a 1280x720.
+ */
+function mosaicoVivo() {
+  const ancho = escalaCanvas >= 0.75 ? 1280 : 960;
+  if (!mosaico || mosaico.canvas.width !== ancho) {
+    mosaico = new Mosaico(ancho, Math.round(ancho * 9 / 16 / 2) * 2);
+  }
+  return mosaico;
+}
+
+/** Lo que va en cada celda del mosaico, en el mismo orden que la grilla. */
+function fuentesMosaico() {
+  const mias = {
+    fuente: el.canvas, alias: getAlias() || 'VOS',
+    aura: players[0]?.aura ?? 0, yo: true, mudo: !micOn,
+  };
+  const otras = (batalla?.lista() ?? [])
+    .map((par) => ({
+      fuente: tiles.get(par.id)?.video || null,
+      alias: par.alias || 'INVITADO',
+      aura: par.aura || 0,
+      yo: false,
+      mudo: !par.micro,
+    }))
+    .filter((f) => f.fuente);
+  return [mias, ...otras];
+}
+
+/** Mi micro (si esta prendido) mas el de todos los demas. */
+function pistasSala() {
+  const p = [];
+  if (micTrack && micOn) p.push(micTrack);
+  for (const par of batalla?.lista() ?? []) {
+    for (const t of par.stream?.getAudioTracks?.() ?? []) p.push(t);
+  }
+  return p;
+}
+
 function countdown() {
   // Jugando solo, cada ronda es su propia partida: sin esto, la mejor ronda
   // de la partida ANTERIOR seguia mandando y una ronda floja mostraba el
   // resultado de la anterior.
   if (modo !== 'versus') reiniciarDuelo();
+  // Se cuenta ACA y no al tocar el boton: entre el boton y la cuenta hay un
+  // permiso de camara y 8MB de modelo, y la mitad de la gente se cae ahi. Lo
+  // que interesa medir es cuantos llegaron a escanear DE VERDAD.
+  hit('escaneo');
   players = [new Player(0), new Player(1)];
   roundLeft = ROUND_SECONDS;
   stressFps = [];
@@ -438,13 +544,17 @@ function countdown() {
   ultimaDeteccion = 0;
   dapCool = 0;
   state = 'countdown';
+  // Se decide ANTES del ensayo: grabar el mosaico cuesta distinto que grabar
+  // mi recuadro (son tres copias de video mas por cuadro), y la prueba de
+  // esfuerzo tiene que medir lo que de verdad se va a hacer.
+  clipGrupo = grabarSala();
   arrancarLoop();
 
   // Ensayo: se graba en falso durante la cuenta y se tira. Sin esto la
   // prueba de esfuerzo medía un frame SIN capturar el canvas, que es
   // justamente lo que se pone caro al grabar.
-  const ensayo = new Recorder(el.canvas);
-  ensayo.start(60);
+  const ensayo = new Recorder(clipGrupo ? mosaicoVivo().canvas : el.canvas);
+  ensayo.start(clipGrupo ? FPS_MOSAICO : 60);
 
   let n = 3;
   show('count');
@@ -493,11 +603,18 @@ function countdown() {
         // ve mejor que uno de 60 al que le faltan cuadros.
         fpsGrabacion = med >= 50 ? 60 : 30;
       }
+      // El mosaico se dibuja acelerado a 30: capturarlo a 60 le pide al
+      // compositor el doble de muestreos de un lienzo que no cambia tan
+      // rapido, y el video que llega de los demas viene a 15-24fps igual.
+      if (clipGrupo) fpsGrabacion = FPS_MOSAICO;
       state = 'running';
       framesRonda = 0;
       deteccionesRonda = 0;
       inicioRonda = performance.now();
-      recorder.start(fpsGrabacion);
+      // El grabador se rehace acá y no en boot(): recién ahora se sabe qué
+      // lienzo hay que grabar (el mío o el de la sala) y con qué resolución.
+      recorder = new Recorder(clipGrupo ? mosaicoVivo().canvas : el.canvas);
+      recorder.start(fpsGrabacion, clipGrupo ? pistasSala() : []);
       return;
     }
     el.countnum.textContent = n;
@@ -589,6 +706,13 @@ function loop() {
     stress: state === 'countdown',
   });
 
+  // El mosaico se arma DESPUES de dibujar mi recuadro: copia el canvas del
+  // frame de recién, no el del anterior. Tambien durante la cuenta regresiva,
+  // porque ese es el costo que la prueba de esfuerzo tiene que medir.
+  if (clipGrupo && (state === 'running' || state === 'countdown')) {
+    mosaico?.dibujar(fuentesMosaico(), FPS_MOSAICO);
+  }
+
   // Trabajo de hilo principal por frame: si pasa de 16.7ms, 60fps es
   // imposible porque rAF cae al siguiente vsync (33.3ms = 30fps clavados).
   // Si NO pasa de 16.7 y los fps igual estan por el piso, el cuello esta
@@ -638,6 +762,14 @@ async function finish() {
   const p = players[winner];
   const aura = Math.round(p.aura);
   const v = verdictFor(aura);
+
+  // TODAS las repeticiones del duelo se guardan, no solo la mejor. Un duelo son
+  // tres rondas y la que uno quiere postear no siempre es la que dio más aura:
+  // seguido es la que salió más ridícula. Se tiran al empezar un duelo nuevo.
+  if (modo === 'versus' && blob) {
+    clipsDuelo.push({ ronda: rondaN, aura, blob, sala: clipGrupo });
+    while (clipsDuelo.length > RONDAS) clipsDuelo.shift();
+  }
 
   // La cinta la puede haber pisado una batalla anterior con GANASTE/PERDISTE.
   el.rTape.textContent = 'VEREDICTO';
@@ -732,7 +864,10 @@ async function finish() {
   // del clip. Guardar la ULTIMA en vez de la mejor hacia que una tercera
   // ronda floja te borrara la primera, que era la buena.
   if (!mejorRonda || aura > mejorRonda.aura) {
-    mejorRonda = { aura, moves: landed, blob, titulo: v.t, sub: el.rSub.textContent, stats: el.rStats.innerHTML };
+    mejorRonda = {
+      aura, moves: landed, blob, titulo: v.t,
+      sub: el.rSub.textContent, stats: el.rStats.innerHTML, sala: clipGrupo,
+    };
   }
 
   // ENTRE RONDAS NO SE CIERRA NADA. Ni torneo, ni clip, ni botones: eso es el
@@ -764,13 +899,15 @@ async function finish() {
       : 'OTRA VEZ';
 
     if (blob) {
-      el.share.textContent = navigator.canShare?.({ files: [new File([blob], 'x', { type: blob.type })] })
-        ? 'COMPARTIR CLIP' : 'DESCARGAR CLIP';
+      const puedeCompartir = navigator.canShare?.({ files: [new File([blob], 'x', { type: blob.type })] });
+      const que = mejorRonda.sala ? 'LA SALA' : 'CLIP';
+      el.share.textContent = `${puedeCompartir ? 'COMPARTIR' : 'DESCARGAR'} ${que}`;
     } else {
       el.share.classList.add('hidden');
       el.rNote.textContent = 'Tu navegador no permite grabar. El escáner sí funcionó.';
     }
   }
+  pintarClips();
   show('result');
 }
 
@@ -799,12 +936,44 @@ let puntos = new Map();       // 'yo' | id de par -> rondas ganadas
 let dueloArrancado = false;
 let dueloCerrado = false;
 let mejorRonda = null;        // mi mejor ronda del duelo: es la que cuenta al final
+const clipsDuelo = [];        // la repeticion de CADA ronda: {ronda, aura, blob, sala}
 
 function reiniciarDuelo() {
   rondaN = 1;
   puntos = new Map();
   dueloCerrado = false;
   mejorRonda = null;
+  clipsDuelo.length = 0;
+}
+
+/**
+ * Los botones para bajarse CADA ronda del duelo.
+ *
+ * El botón grande sigue bajando la mejor —es la que va al torneo y la que uno
+ * postea—, pero la ronda que da más risa no siempre es la que dio más aura, y
+ * hasta ahora las otras dos se tiraban a la basura sin preguntar.
+ */
+function pintarClips() {
+  el.rClipsFila.replaceChildren();
+  const hay = clipsDuelo.filter((c) => c.blob);
+  // Con una sola ronda grabada esto no aporta nada: es el mismo archivo que ya
+  // baja el botón grande.
+  const visible = dueloCerrado && hay.length > 1;
+  el.rClips.classList.toggle('hidden', !visible);
+  if (!visible) return;
+
+  for (const c of hay) {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.textContent = `RONDA ${c.ronda} · ${c.aura.toLocaleString('es-GT')}`;
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      const r = await shareOrDownload(c.blob, c.aura, c.sala ? 'sala-aura' : 'mi-aura');
+      b.disabled = false;
+      if (r === 'downloaded') el.rNote.textContent = 'Guardado. Subilo y etiquetame.';
+    });
+    el.rClipsFila.appendChild(b);
+  }
 }
 
 /**
@@ -833,6 +1002,11 @@ function crearTile(id) {
   // grilla de dos eso me deja a la izquierda, que es como uno se espera verse.
   el.tiles.appendChild(caja);
   const t = { caja, video, nombre, aura };
+  // La proporción del video ajeno no se sabe hasta que llega el primer cuadro,
+  // y puede CAMBIAR en el medio: el gobernador de calidad de la malla baja la
+  // resolucion cuando entra gente, y un teléfono que se gira manda otra cosa.
+  video.addEventListener('loadedmetadata', () => ajustarEncaje(t));
+  video.addEventListener('resize', () => ajustarEncaje(t));
   tiles.set(id, t);
   return t;
 }
@@ -1164,6 +1338,7 @@ function salirDeSala({ apagarCamara = false } = {}) {
     recorder?.cancelar();
     state = 'idle';
   }
+  clipGrupo = false;
   if (apagarCamara) {
     cancelAnimationFrame(raf);
     pararDeteccion();
@@ -1227,6 +1402,7 @@ async function entrarASala(codigo, tipo = 'privada') {
   });
   batalla.ponerMicro(micTrack);
   batalla.avisarMicro(micOn);
+  hit('sala');
 
   show();               // sin paneles: se ve la sala
   pintarSala();
@@ -1262,11 +1438,23 @@ async function buscarYEntrar() {
   if (!await boot(false)) return;
   el.buscMsg.textContent = 'Emparejando…';
   show('buscando');
+  // A la vista de una: el que entra a la cola es el que más necesita saber si
+  // hay alguien del otro lado, y esperar al refresco de medio minuto le deja
+  // el spinner sin una sola cifra al lado.
+  refrescarOnline(true);
   try {
     // La cola solo reparte el codigo; despues los dos entran a la misma sala
     // por el mismo camino que los amigos, con cupo de dos. Una sola
     // implementacion de sala en vez de dos que hay que mantener sincronizadas.
-    const codigo = await buscador.buscarRival();
+    // El servidor avisa cuantos hay esperando cada vez que cambia. Decirle a
+    // alguien que esta solo en la cola parece un mal mensaje y es al reves: el
+    // que sabe que no hay nadie manda el link o arma una sala, y el que no
+    // sabe se queda mirando un spinner noventa segundos y cierra la pagina.
+    const codigo = await buscador.buscarRival(({ esperando }) => {
+      el.buscMsg.textContent = esperando > 1
+        ? `${esperando} esperando. Emparejando…`
+        : 'Sos el único en la cola. Pasá el link a alguien o armá una sala con código.';
+    });
     await entrar(codigo, 'azar');
   } catch (e) {
     if (e.message === CANCELADO) return;      // se salió a propósito
@@ -1337,6 +1525,82 @@ if (hayVersus()) {
   el.irAzar?.classList.remove('hidden');
   el.irCrear?.classList.remove('hidden');
   el.filaCodigo?.classList.remove('hidden');
+}
+
+// ---------- cuanta gente hay del otro lado ----------
+//
+// Dos numeros distintos: `cola` son los que estan esperando rival EN ESTE
+// SEGUNDO (los tiene conectados el lobby) y `jugando` los que hicieron algo en
+// los ultimos diez minutos. El primero es el que decide si tocar "BUSCAR
+// RIVAL" tiene sentido; el segundo dice si la pagina esta viva.
+//
+// Se pide SOLO con el menu a la vista y con la pestaña al frente. Mientras se
+// juega no le importa a nadie, y un request cada medio minuto por cada persona
+// que dejo la pagina abierta se convierte en el pico de trafico mas grande del
+// dia sin que nadie lo mire.
+const CADA_ONLINE = 30000;
+let ultimoOnline = 0;
+
+const cuantos = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+
+function pintarOnline(d) {
+  if (!d || !el.online) return;         // se cayo el pedido: se deja lo de antes
+  const otros = Math.max(0, d.jugando - 1);   // sin contarme a mi
+  el.online.classList.remove('hidden');
+  el.online.classList.toggle('vacio', d.cola === 0);
+  el.online.textContent = d.cola > 0
+    ? `${cuantos(d.cola, 'persona buscando rival', 'personas buscando rival')} ahora mismo.`
+    : otros > 0
+      ? `Nadie en la cola. ${cuantos(otros, 'persona escaneando', 'personas escaneando')} igual.`
+      : 'No hay nadie más ahora. Armá una sala y pasá el código.';
+}
+
+/**
+ * El mismo dato, pero para el que YA está esperando.
+ *
+ * Acá el número de la cola no se repite: ese lo escribe `buscMsg` y es exacto
+ * (lo avisa el servidor por el mismo socket cada vez que cambia). Lo que falta
+ * mientras gira el spinner es lo otro: cuánta gente hay en la página. Noventa
+ * segundos de espera se aguantan sabiendo que hay veinte personas escaneando y
+ * no se aguantan ni diez si uno sospecha que no hay nadie.
+ */
+function pintarBuscando(d) {
+  if (!d || !el.buscOnline) return;
+  const solo = d.jugando <= 1;
+  el.buscOnline.classList.remove('hidden');
+  el.buscOnline.classList.toggle('vacio', solo);
+  el.buscOnline.textContent = solo
+    ? 'No hay nadie más en el escáner ahora mismo.'
+    : `${cuantos(d.jugando, 'persona', 'personas')} en el escáner ahora mismo.`;
+}
+
+/** ¿Alguna de las dos pantallas que muestran el número está a la vista? */
+const miraOnline = () => !el.intro.classList.contains('hidden')
+  || !el.buscando.classList.contains('hidden');
+
+/**
+ * @param {boolean} forzar Saltea el mínimo de 10s. Lo usa el que ACABA de
+ *   entrar a la cola: viene del menú, donde el número se acaba de pedir, y sin
+ *   esto la pantalla de búsqueda arrancaba muda hasta el refresco siguiente.
+ */
+async function refrescarOnline(forzar = false) {
+  if (!hayVersus() || document.hidden) return;
+  const ahora = Date.now();
+  if (!forzar && ahora - ultimoOnline < 10000) return;   // show() se llama seguido
+  ultimoOnline = ahora;
+  const d = await pedirOnline();
+  pintarOnline(d);
+  pintarBuscando(d);
+}
+
+if (hayVersus()) {
+  setInterval(() => { if (miraOnline()) refrescarOnline(); }, CADA_ONLINE);
+  // Volver a la pestaña despues de un rato y ver el numero viejo es peor que
+  // no verlo: el que se fue a mandar el link vuelve a mirar justo esto.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && miraOnline()) refrescarOnline();
+  });
+  refrescarOnline();
 }
 
 // ---------- torneo ----------
@@ -1479,6 +1743,11 @@ function startPrefetch() {
 if ('requestIdleCallback' in window) requestIdleCallback(startPrefetch, { timeout: 2500 });
 else setTimeout(startPrefetch, 1200);
 
+// Una linea al servidor diciendo "entro alguien". Sin esto no hay forma de
+// saber cuanta gente entro: Pages no da logs y el ranking solo ve a los que
+// escriben su nombre, que son una minoria.
+contarVisita();
+
 // ---------- eventos ----------
 el.go.addEventListener('click', () => { startPrefetch(); boot(); });
 el.retry.addEventListener('click', () => { el.go.disabled = false; show('intro'); });
@@ -1505,7 +1774,14 @@ el.again.addEventListener('click', async () => {
 el.share.addEventListener('click', async () => {
   if (!blob) return;
   el.share.disabled = true;
-  const r = await shareOrDownload(blob, Math.round(players[0].aura));
+  // El aura del nombre del archivo es la de la ronda QUE SE ESTÁ BAJANDO (la
+  // mejor del duelo), no la de `players`, que ya se reinició al empezar otra.
+  const r = await shareOrDownload(
+    blob,
+    mejorRonda?.aura ?? Math.round(players[0].aura),
+    mejorRonda?.sala ? 'sala-aura' : 'mi-aura',
+  );
   el.share.disabled = false;
+  hit('clip');
   if (r === 'downloaded') el.rNote.textContent = 'Guardado. Subilo y etiquetame.';
 });
