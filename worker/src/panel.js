@@ -11,9 +11,6 @@ export const PANEL = `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow" />
-<!-- Icono vacio: sin esto el navegador pide /favicon.ico, el worker contesta
-     404 y el panel arranca con un error rojo en la consola que no es nada. -->
-<link rel="icon" href="data:," />
 <title>AURA · panel</title>
 <style>
   :root { --tinta:#0a0a0c; --hueso:#f4efe4; --acido:#c6ff00; --magenta:#ff2e88; }
@@ -34,17 +31,14 @@ export const PANEL = `<!doctype html>
   .sub { opacity: .45; font-size: 12px; margin: 0 0 22px; }
 
   .vivo { display: flex; align-items: baseline; gap: 10px; border: 1px solid rgba(198,255,0,.35); padding: 14px 16px; }
-  .vivo { flex-wrap: wrap; }
   .vivo b { font-size: 34px; color: var(--acido); font-weight: 400; line-height: 1; }
   .vivo small { opacity: .5; }
-  .vivo small.pico { opacity: .75; color: var(--hueso); }
 
   .cajas { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
   .caja { border: 1px solid rgba(244,239,228,.18); padding: 11px 13px; }
   .caja span { display: block; font-size: 11px; letter-spacing: .12em; opacity: .45; }
   .caja b { font-size: 25px; font-weight: 400; color: var(--acido); }
   .caja em { font-style: normal; opacity: .4; font-size: 11px; }
-  .nota { font-size: 11px; opacity: .4; margin: 9px 0 0; max-width: 70ch; line-height: 1.6; }
 
   .barras { display: flex; align-items: flex-end; gap: 4px; height: 130px; }
   /* El tope de ancho es para los primeros dias: con una sola barra a flex:1 el
@@ -143,30 +137,6 @@ function seccion(titulo) {
   return h;
 }
 
-/** Aclaración al pie de una sección: lo que el número NO dice. */
-function nota(texto) {
-  const p = document.createElement('p');
-  p.className = 'nota';
-  p.textContent = texto;
-  $('todo').appendChild(p);
-}
-
-/** Una fila de cajas [rótulo, número, pie]. El pie es opcional. */
-function tarjetas(lista) {
-  const caja = document.createElement('div');
-  caja.className = 'cajas';
-  for (const [k, v, pie] of lista) {
-    const c = document.createElement('div');
-    c.className = 'caja';
-    const s = document.createElement('span'); s.textContent = k;
-    const n = document.createElement('b'); n.textContent = num(v);
-    c.append(s, n);
-    if (pie) { const e = document.createElement('em'); e.textContent = ' ' + pie; c.appendChild(e); }
-    caja.appendChild(c);
-  }
-  return caja;
-}
-
 function pintar(d) {
   $('todo').textContent = '';
 
@@ -178,60 +148,48 @@ function pintar(d) {
   const t = document.createElement('small');
   t.textContent = 'personas activas en los últimos 10 minutos';
   vivo.appendChild(t);
-
-  // El pico del dia. Es lo que este numero no puede decir solo: si el panel se
-  // abre a las once, el momento en que hubo cuarenta personas juntas ya paso.
-  const ph = (d.horas || []).reduce((a, x) => (x.maximo > (a ? a.maximo : 0) ? x : a), null);
-  if (ph) {
-    const p = document.createElement('small');
-    p.className = 'pico';
-    p.textContent = '· pico de hoy ' + num(ph.maximo) + ' a las ' +
-      new Date(ph.ts).toLocaleTimeString('es-GT', { hour: '2-digit', minute: '2-digit' });
-    vivo.appendChild(p);
-  }
   $('todo').appendChild(vivo);
 
   const hoy = d.dias[0] || {};
   const sem = d.dias.slice(0, 7);
   const suma = (k) => sem.reduce((a, x) => a + Number(x[k] || 0), 0);
-  const pct = (parte, todo) => (todo > 0 ? Math.round(parte / todo * 100) + '%' : '—');
 
-  // LA PREGUNTA. Cuánta gente entró, en los cuatro rangos, arriba de todo y
-  // sin tener que sumar nada a mano. Todo lo demás del panel es el detalle.
-  const rango = (n) => d.dias.slice(0, n).reduce(
-    (a, x) => ({ gente: a.gente + Number(x.gente || 0), visitas: a.visitas + Number(x.visitas || 0) }),
-    { gente: 0, visitas: 0 },
-  );
-  const r1 = rango(1), r7 = rango(7), r30 = rango(30);
-  seccion('CUÁNTA GENTE ENTRÓ');
-  $('todo').appendChild(tarjetas([
-    ['HOY', r1.gente, num(r1.visitas) + ' sesiones'],
-    ['7 DÍAS', r7.gente, num(r7.visitas) + ' sesiones'],
-    ['30 DÍAS', r30.gente, num(r30.visitas) + ' sesiones'],
-    ['HISTÓRICO', d.total.gente, num(d.total.visitas) + ' sesiones'],
-  ]));
-  nota('Personas = los únicos de cada día, sumados. Quien vuelve OTRO día cuenta otra vez: '
-    + 'el identificador se renueva cada medianoche justamente para no poder seguir a nadie, '
-    + 'así que el número real está entre ese y el del día más alto. Las sesiones sí son exactas.');
-
+  seccion('HOY (' + (hoy.dia || '—') + ')');
+  const cajas = document.createElement('div');
+  cajas.className = 'cajas';
   const tHoy = (d.torneo || []).find((x) => x.dia === hoy.dia) || {};
-  seccion('QUÉ HICIERON HOY (' + (hoy.dia || '—') + ')');
-  $('todo').appendChild(tarjetas([
-    ['VUELVEN', hoy.vuelven, pct(hoy.vuelven, hoy.visitas) + ' de las sesiones'],
+  const datos = [
+    ['PERSONAS', hoy.gente, 'únicas'],
+    ['ABIERTAS', hoy.visitas, 'sesiones'],
     ['ESCANEOS', hoy.escaneos, 'rondas'],
     ['CLIPS', hoy.clips, 'bajados'],
     ['SALAS', hoy.salas, 'entradas'],
     ['TORNEO', tHoy.jugadores, num(tHoy.partidas || 0) + ' partidas'],
-  ]));
+  ];
+  for (const [k, v, pie] of datos) {
+    const c = document.createElement('div');
+    c.className = 'caja';
+    const s = document.createElement('span'); s.textContent = k;
+    const n = document.createElement('b'); n.textContent = num(v);
+    const e = document.createElement('em'); e.textContent = ' ' + pie;
+    c.append(s, n, e);
+    cajas.appendChild(c);
+  }
+  $('todo').appendChild(cajas);
 
   seccion('ÚLTIMOS 7 DÍAS');
-  $('todo').appendChild(tarjetas([
-    ['VUELVEN', suma('vuelven'), pct(suma('vuelven'), suma('visitas')) + ' de las sesiones'],
-    ['ESCANEOS', suma('escaneos'), 'rondas'],
-    ['CLIPS', suma('clips'), 'bajados'],
-    ['SALAS', suma('salas'), 'entradas'],
-    ['PICO', Math.max(...(d.picos || []).slice(0, 7).map((x) => x.pico), 0), 'juntos a la vez'],
-  ]));
+  const c7 = document.createElement('div');
+  c7.className = 'cajas';
+  for (const [k, v] of [['PERSONAS', suma('gente')], ['ABIERTAS', suma('visitas')],
+                        ['ESCANEOS', suma('escaneos')], ['CLIPS', suma('clips')]]) {
+    const c = document.createElement('div');
+    c.className = 'caja';
+    const s = document.createElement('span'); s.textContent = k;
+    const n = document.createElement('b'); n.textContent = num(v);
+    c.append(s, n);
+    c7.appendChild(c);
+  }
+  $('todo').appendChild(c7);
 
   // Personas por dia. Sumar los "unicos" de varios dias NO da los unicos del
   // periodo —el que vuelve manana se cuenta dos veces— y no hay forma de que
@@ -256,32 +214,6 @@ function pintar(d) {
     $('todo').append(caja, pies);
   }
 
-  // Curva del dia. Se dibujan las 24 horas aunque falten: con solo las horas
-  // que tienen dato, tres barras seguidas parecen tres horas seguidas y en
-  // realidad puede haber medio dia en el medio.
-  if ((d.horas || []).length) {
-    seccion('GENTE A LA VEZ, POR HORA (HOY, UTC)');
-    const porHora = {};
-    for (const h of d.horas) porHora[String(h.hora).slice(11)] = h.maximo;
-    const topeH = Math.max(...d.horas.map((x) => x.maximo), 1);
-    const cajaH = document.createElement('div');
-    cajaH.className = 'barras';
-    const piesH = document.createElement('div');
-    piesH.className = 'pies';
-    for (let i = 0; i < 24; i++) {
-      const hh = String(i).padStart(2, '0');
-      const v = porHora[hh] || 0;
-      const bar = document.createElement('div');
-      bar.style.height = (v / topeH * 100) + '%';
-      bar.title = hh + ':00 — ' + num(v) + ' a la vez';
-      cajaH.appendChild(bar);
-      const p = document.createElement('span');
-      p.textContent = i % 3 === 0 ? hh : '';
-      piesH.appendChild(p);
-    }
-    $('todo').append(cajaH, piesH);
-  }
-
   seccion('PAÍSES (7 DÍAS)');
   const tp = document.createElement('table');
   const topP = Math.max(...d.paises.map((x) => x.gente), 1);
@@ -299,23 +231,13 @@ function pintar(d) {
   $('todo').appendChild(tr);
 
   seccion('DÍA POR DÍA');
-  const porDia = {};
-  for (const p of d.picos || []) porDia[p.dia] = p.pico;
   const td = document.createElement('table');
-  fila(td, ['día', 'personas', 'pico', 'vuelven', 'escaneos', 'clips', 'salas']).style.opacity = '.45';
+  fila(td, ['día', 'personas', 'escaneos', 'clips', 'salas']).style.opacity = '.45';
   for (const x of d.dias) {
-    fila(td, [x.dia, { clase: 'n', txt: num(x.gente) }, { clase: 'n', txt: num(porDia[x.dia] || 0) },
-              { clase: 'n', txt: num(x.vuelven) }, { clase: 'n', txt: num(x.escaneos) },
+    fila(td, [x.dia, { clase: 'n', txt: num(x.gente) }, { clase: 'n', txt: num(x.escaneos) },
               { clase: 'n', txt: num(x.clips) }, { clase: 'n', txt: num(x.salas) }]);
   }
   $('todo').appendChild(td);
-
-  seccion('HISTÓRICO (DESDE ' + (d.total.desde ? new Date(d.total.desde).toISOString().slice(0, 10) : '—') + ')');
-  $('todo').appendChild(tarjetas([
-    ['VUELVEN', d.total.vuelven, pct(d.total.vuelven, d.total.visitas) + ' de las sesiones'],
-    ['RÉCORD', Math.max(...(d.picos || []).map((x) => x.pico), 0), 'juntos a la vez'],
-    ['EVENTOS', d.total.eventos, 'guardados'],
-  ]));
 
   $('sub').textContent = num(d.total.eventos) + ' eventos guardados · actualizado ' +
     new Date().toLocaleTimeString('es-GT');

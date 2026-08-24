@@ -50,14 +50,10 @@ CREATE TABLE IF NOT EXISTS eventos (
   pais      TEXT    NOT NULL DEFAULT 'XX',
   region    TEXT    NOT NULL DEFAULT '',
   ref       TEXT    NOT NULL DEFAULT 'directo',   -- de donde vino (host o ?ref=)
-  vuelve    INTEGER NOT NULL DEFAULT 0, -- 1 si ya habia entrado antes, ver abajo
   dia       TEXT    NOT NULL,          -- YYYY-MM-DD (UTC)
   semana    TEXT    NOT NULL,          -- YYYY-Www (UTC, ISO)
   ts        INTEGER NOT NULL           -- epoch ms
 );
-
--- Si la tabla ya existia sin `vuelve`, una sola vez:
---   ALTER TABLE eventos ADD COLUMN vuelve INTEGER NOT NULL DEFAULT 0;
 
 -- Mismo criterio que arriba: primero lo que filtra, despues lo que agrupa.
 -- `ix_ev_ts` es el de "cuanta gente hay ahora", que corre cada pocos segundos
@@ -65,19 +61,3 @@ CREATE TABLE IF NOT EXISTS eventos (
 CREATE INDEX IF NOT EXISTS ix_ev_dia   ON eventos (dia, tipo);
 CREATE INDEX IF NOT EXISTS ix_ev_ts    ON eventos (ts);
 CREATE INDEX IF NOT EXISTS ix_ev_quien ON eventos (dia, visitante);
-
--- Cuanta gente hubo A LA VEZ. `eventos` no puede contestar esto solo: el
--- maximo de un dia es un instante, y si nadie mira el panel a las nueve de la
--- noche ese instante no queda escrito en ningun lado. Un cron del worker mide
--- cada minuto y guarda el techo de cada hora.
---
--- UNA FILA POR HORA y no por medicion: son 24 filas por dia en vez de 1440, el
--- maximo del dia sale con MAX() sobre esas 24, y ademas queda la curva por
--- hora —que es la que dice a que hora conviene postear.
-CREATE TABLE IF NOT EXISTS picos (
-  dia    TEXT    NOT NULL,          -- YYYY-MM-DD (UTC)
-  hora   TEXT    NOT NULL,          -- YYYY-MM-DDTHH (UTC)
-  maximo INTEGER NOT NULL,          -- personas activas a la vez en esa hora
-  ts     INTEGER NOT NULL,          -- cuando se dio ese maximo
-  PRIMARY KEY (dia, hora)
-);

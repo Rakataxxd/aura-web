@@ -20,7 +20,7 @@
 //   WS   /api/sala?codigo=XXXX[&max=N][&alias=x] sala de hasta 6
 
 import { Sala, Lobby, codigoValido } from './salas.js';
-import { anotar, online, esAdmin, resumen, medirPico } from './analitica.js';
+import { anotar, online, esAdmin, resumen } from './analitica.js';
 import { PANEL } from './panel.js';
 export { Sala, Lobby };
 
@@ -128,18 +128,6 @@ async function puestoDe(env, f, aliasKey) {
 }
 
 export default {
-  /**
-   * Cron de cada minuto: mide cuanta gente hay a la vez y guarda el techo.
-   *
-   * Tiene que ser un reloj y no una consulta: el maximo de un dia es un
-   * INSTANTE. Si el pico fue a las nueve de la noche y el panel se abre a las
-   * once, ese numero ya no existe en ningun lado — `eventos` sabe cuantos
-   * hubo en el dia, no cuantos hubo juntos.
-   */
-  async scheduled(evento, env, ctx) {
-    ctx.waitUntil(medirPico(env).catch((e) => console.warn('[pico]', e?.message)));
-  },
-
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
 

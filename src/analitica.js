@@ -15,7 +15,6 @@ const API = (new URLSearchParams(location.search).get('api')
   || '').replace(/\/$/, '');
 
 const CLAVE_SESION = 'aura.visto';
-const CLAVE_PRIMERA = 'aura.primera';   // el dia de la primera vez, en localStorage
 
 // Techo de eventos por sesion. Una partida son cuatro o cinco; con esto, una
 // pestaña abierta toda la tarde jugando sigue sin escribir cien filas.
@@ -44,37 +43,17 @@ function deDonde() {
  * —con `application/json` el navegador manda un OPTIONS antes y serian dos
  * requests por cada evento.
  */
-export function hit(tipo, extra = {}) {
+export function hit(tipo) {
   if (!API || mandados >= TOPE) return;
   mandados++;
   try {
     fetch(`${API}/api/hit`, {
       method: 'POST',
       headers: { 'content-type': 'text/plain;charset=UTF-8' },
-      body: JSON.stringify({ tipo, ref: tipo === 'visita' ? deDonde() : '', ...extra }),
+      body: JSON.stringify({ tipo, ref: tipo === 'visita' ? deDonde() : '' }),
       keepalive: true,
     }).catch(() => { /* que se pierda */ });
   } catch { /* que se pierda */ }
-}
-
-/**
- * Si esta persona ya habia entrado antes. La marca vive en SU telefono y lo
- * unico que sale de ahi es un si o un no.
- *
- * El servidor no puede saberlo solo: el hash del visitante cambia todas las
- * noches justamente para que no se pueda seguir a nadie de un dia al otro. Con
- * esto se sabe CUANTOS vuelven sin saber QUIENES, que es lo que se queria.
- *
- * En incognito localStorage tira o se vacia al cerrar: ahi todos cuentan como
- * nuevos. Sesga el numero para abajo, y es mejor que inventarlo.
- */
-function yaHabiaEntrado() {
-  try {
-    const antes = localStorage.getItem(CLAVE_PRIMERA);
-    if (antes) return true;
-    localStorage.setItem(CLAVE_PRIMERA, new Date().toISOString().slice(0, 10));
-  } catch { /* incognito */ }
-  return false;
 }
 
 /**
@@ -87,10 +66,7 @@ export function contarVisita() {
     if (sessionStorage.getItem(CLAVE_SESION)) return;
     sessionStorage.setItem(CLAVE_SESION, '1');
   } catch { /* modo incognito: se cuenta igual */ }
-  // El orden importa: `yaHabiaEntrado` ESCRIBE la marca la primera vez, asi
-  // que tiene que correr una sola vez por sesion o la segunda pestaña del
-  // mismo dia ya se contaria como alguien que vuelve.
-  hit('visita', { vuelve: yaHabiaEntrado() });
+  hit('visita');
 }
 
 /**

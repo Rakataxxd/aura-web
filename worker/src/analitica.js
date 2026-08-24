@@ -63,47 +63,18 @@ export async function anotar(req, env, { pais, region, hoy, cuerpo }) {
 
   const ts = Date.now();
   await env.DB.prepare(
-    `INSERT INTO eventos (tipo, visitante, pais, region, ref, vuelve, dia, semana, ts)
-     VALUES (?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO eventos (tipo, visitante, pais, region, ref, dia, semana, ts)
+     VALUES (?,?,?,?,?,?,?,?)`
   ).bind(
     tipo,
     await visitanteDe(req, env, hoy.dia),
     pais,
     region,
     tipo === 'visita' ? limpiarRef(body.ref) : 'directo',
-    // Quien vuelve lo dice EL TELEFONO, no el servidor. Aca no se puede saber:
-    // el hash del visitante cambia todas las noches justamente para que no se
-    // pueda. El navegador tiene la marca de la primera vez en su localStorage
-    // y manda un si o un no, que se cuenta sin saber de quien es.
-    tipo === 'visita' && body.vuelve ? 1 : 0,
     hoy.dia,
     hoy.semana,
     ts,
   ).run();
-}
-
-/**
- * Mide cuanta gente hay a la vez y guarda el techo de la hora. Lo llama el
- * cron cada minuto (ver wrangler.toml).
- *
- * El `WHERE` del upsert es lo que hace que esto casi nunca escriba: la fila de
- * la hora solo se toca cuando el numero SUPERA al que ya estaba. Un minuto
- * flojo no cuesta ni una escritura.
- */
-export async function medirPico(env) {
-  const ahora = Date.now();
-  const fila = await env.DB.prepare('SELECT COUNT(DISTINCT visitante) AS n FROM eventos WHERE ts > ?')
-    .bind(ahora - VENTANA_ONLINE).first();
-  const n = fila?.n ?? 0;
-  if (!n) return 0;                    // sin nadie no hay nada que guardar
-
-  const iso = new Date(ahora).toISOString();
-  await env.DB.prepare(
-    `INSERT INTO picos (dia, hora, maximo, ts) VALUES (?,?,?,?)
-     ON CONFLICT(dia, hora) DO UPDATE SET maximo = excluded.maximo, ts = excluded.ts
-     WHERE excluded.maximo > picos.maximo`
-  ).bind(iso.slice(0, 10), iso.slice(0, 13), n, ahora).run();
-  return n;
 }
 
 /**
@@ -157,16 +128,14 @@ const diaHace = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0
  */
 export async function resumen(env) {
   const semana = diaHace(7);
-  const hoy = new Date().toISOString().slice(0, 10);
-  const [dias, paises, refs, torneo, ahora, total, picos, horas] = await env.DB.batch([
+  const [dias, paises, refs, torneo, ahora, total] = await env.DB.batch([
     env.DB.prepare(
       `SELECT dia,
               COUNT(DISTINCT visitante) AS gente,
               SUM(tipo = 'visita')  AS visitas,
               SUM(tipo = 'escaneo') AS escaneos,
               SUM(tipo = 'clip')    AS clips,
-              SUM(tipo = 'sala')    AS salas,
-              SUM(tipo = 'visita' AND vuelve = 1) AS vuelven
+              SUM(tipo = 'sala')    AS salas
          FROM eventos GROUP BY dia ORDER BY dia DESC LIMIT 30`
     ),
     env.DB.prepare(
@@ -183,20 +152,7 @@ export async function resumen(env) {
     ),
     env.DB.prepare('SELECT COUNT(DISTINCT visitante) AS n FROM eventos WHERE ts > ?')
       .bind(Date.now() - VENTANA_ONLINE),
-    // El acumulado de personas es una SUMA DE UNICOS DIARIOS y no un
-    // COUNT(DISTINCT) sobre todo: el hash del visitante cambia cada noche, asi
-    // que el mismo telefono en dos dias son dos hashes y no hay consulta que
-    // los junte. Se muestra con ese nombre en el panel; el que vuelve suma dos
-    // veces y eso hay que decirlo, no esconderlo.
-    env.DB.prepare(
-      `SELECT (SELECT COUNT(*) FROM eventos) AS eventos,
-              (SELECT MIN(ts) FROM eventos) AS desde,
-              (SELECT COUNT(*) FROM eventos WHERE tipo = 'visita') AS visitas,
-              (SELECT COUNT(*) FROM eventos WHERE tipo = 'visita' AND vuelve = 1) AS vuelven,
-              (SELECT SUM(g) FROM (SELECT COUNT(DISTINCT visitante) AS g FROM eventos GROUP BY dia)) AS gente`
-    ),
-    env.DB.prepare('SELECT dia, MAX(maximo) AS pico FROM picos GROUP BY dia ORDER BY dia DESC LIMIT 30'),
-    env.DB.prepare('SELECT hora, maximo, ts FROM picos WHERE dia = ? ORDER BY hora').bind(hoy),
+    env.DB.prepare('SELECT COUNT(*) AS eventos, MIN(ts) AS desde FROM eventos'),
   ]);
 
   return {
@@ -206,7 +162,5 @@ export async function resumen(env) {
     torneo: torneo.results || [],
     ahora: ahora.results?.[0]?.n ?? 0,
     total: total.results?.[0] || { eventos: 0, desde: null },
-    picos: picos.results || [],
-    horas: horas.results || [],
   };
 }
