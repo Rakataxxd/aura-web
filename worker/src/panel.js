@@ -11,6 +11,9 @@ export const PANEL = `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow" />
+<!-- Icono vacio: sin esto el navegador pide /favicon.ico, el worker contesta
+     404 y el panel arranca con un error rojo en la consola que no es nada. -->
+<link rel="icon" href="data:," />
 <title>AURA · panel</title>
 <style>
   :root { --tinta:#0a0a0c; --hueso:#f4efe4; --acido:#c6ff00; --magenta:#ff2e88; }
@@ -31,8 +34,10 @@ export const PANEL = `<!doctype html>
   .sub { opacity: .45; font-size: 12px; margin: 0 0 22px; }
 
   .vivo { display: flex; align-items: baseline; gap: 10px; border: 1px solid rgba(198,255,0,.35); padding: 14px 16px; }
+  .vivo { flex-wrap: wrap; }
   .vivo b { font-size: 34px; color: var(--acido); font-weight: 400; line-height: 1; }
   .vivo small { opacity: .5; }
+  .vivo small.pico { opacity: .75; color: var(--hueso); }
 
   .cajas { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
   .caja { border: 1px solid rgba(244,239,228,.18); padding: 11px 13px; }
@@ -148,6 +153,17 @@ function pintar(d) {
   const t = document.createElement('small');
   t.textContent = 'personas activas en los últimos 10 minutos';
   vivo.appendChild(t);
+
+  // El pico del dia. Es lo que este numero no puede decir solo: si el panel se
+  // abre a las once, el momento en que hubo cuarenta personas juntas ya paso.
+  const ph = (d.horas || []).reduce((a, x) => (x.maximo > (a ? a.maximo : 0) ? x : a), null);
+  if (ph) {
+    const p = document.createElement('small');
+    p.className = 'pico';
+    p.textContent = '· pico de hoy ' + num(ph.maximo) + ' a las ' +
+      new Date(ph.ts).toLocaleTimeString('es-GT', { hour: '2-digit', minute: '2-digit' });
+    vivo.appendChild(p);
+  }
   $('todo').appendChild(vivo);
 
   const hoy = d.dias[0] || {};
@@ -158,9 +174,11 @@ function pintar(d) {
   const cajas = document.createElement('div');
   cajas.className = 'cajas';
   const tHoy = (d.torneo || []).find((x) => x.dia === hoy.dia) || {};
+  const pct = (parte, todo) => (todo > 0 ? Math.round(parte / todo * 100) + '%' : '—');
   const datos = [
     ['PERSONAS', hoy.gente, 'únicas'],
     ['ABIERTAS', hoy.visitas, 'sesiones'],
+    ['VUELVEN', hoy.vuelven, pct(hoy.vuelven, hoy.visitas) + ' de las sesiones'],
     ['ESCANEOS', hoy.escaneos, 'rondas'],
     ['CLIPS', hoy.clips, 'bajados'],
     ['SALAS', hoy.salas, 'entradas'],
@@ -180,13 +198,20 @@ function pintar(d) {
   seccion('ÚLTIMOS 7 DÍAS');
   const c7 = document.createElement('div');
   c7.className = 'cajas';
-  for (const [k, v] of [['PERSONAS', suma('gente')], ['ABIERTAS', suma('visitas')],
-                        ['ESCANEOS', suma('escaneos')], ['CLIPS', suma('clips')]]) {
+  for (const [k, v, pie] of [
+    ['PERSONAS', suma('gente'), 'suma de días'],
+    ['ABIERTAS', suma('visitas'), 'sesiones'],
+    ['VUELVEN', suma('vuelven'), pct(suma('vuelven'), suma('visitas')) + ' de las sesiones'],
+    ['ESCANEOS', suma('escaneos'), 'rondas'],
+    ['CLIPS', suma('clips'), 'bajados'],
+    ['PICO', Math.max(...(d.picos || []).slice(0, 7).map((x) => x.pico), 0), 'juntos a la vez'],
+  ]) {
     const c = document.createElement('div');
     c.className = 'caja';
     const s = document.createElement('span'); s.textContent = k;
     const n = document.createElement('b'); n.textContent = num(v);
-    c.append(s, n);
+    const e = document.createElement('em'); e.textContent = ' ' + pie;
+    c.append(s, n, e);
     c7.appendChild(c);
   }
   $('todo').appendChild(c7);
@@ -214,6 +239,32 @@ function pintar(d) {
     $('todo').append(caja, pies);
   }
 
+  // Curva del dia. Se dibujan las 24 horas aunque falten: con solo las horas
+  // que tienen dato, tres barras seguidas parecen tres horas seguidas y en
+  // realidad puede haber medio dia en el medio.
+  if ((d.horas || []).length) {
+    seccion('GENTE A LA VEZ, POR HORA (HOY, UTC)');
+    const porHora = {};
+    for (const h of d.horas) porHora[String(h.hora).slice(11)] = h.maximo;
+    const topeH = Math.max(...d.horas.map((x) => x.maximo), 1);
+    const cajaH = document.createElement('div');
+    cajaH.className = 'barras';
+    const piesH = document.createElement('div');
+    piesH.className = 'pies';
+    for (let i = 0; i < 24; i++) {
+      const hh = String(i).padStart(2, '0');
+      const v = porHora[hh] || 0;
+      const bar = document.createElement('div');
+      bar.style.height = (v / topeH * 100) + '%';
+      bar.title = hh + ':00 — ' + num(v) + ' a la vez';
+      cajaH.appendChild(bar);
+      const p = document.createElement('span');
+      p.textContent = i % 3 === 0 ? hh : '';
+      piesH.appendChild(p);
+    }
+    $('todo').append(cajaH, piesH);
+  }
+
   seccion('PAÍSES (7 DÍAS)');
   const tp = document.createElement('table');
   const topP = Math.max(...d.paises.map((x) => x.gente), 1);
@@ -231,13 +282,41 @@ function pintar(d) {
   $('todo').appendChild(tr);
 
   seccion('DÍA POR DÍA');
+  const porDia = {};
+  for (const p of d.picos || []) porDia[p.dia] = p.pico;
   const td = document.createElement('table');
-  fila(td, ['día', 'personas', 'escaneos', 'clips', 'salas']).style.opacity = '.45';
+  fila(td, ['día', 'personas', 'pico', 'vuelven', 'escaneos', 'clips', 'salas']).style.opacity = '.45';
   for (const x of d.dias) {
-    fila(td, [x.dia, { clase: 'n', txt: num(x.gente) }, { clase: 'n', txt: num(x.escaneos) },
+    fila(td, [x.dia, { clase: 'n', txt: num(x.gente) }, { clase: 'n', txt: num(porDia[x.dia] || 0) },
+              { clase: 'n', txt: num(x.vuelven) }, { clase: 'n', txt: num(x.escaneos) },
               { clase: 'n', txt: num(x.clips) }, { clase: 'n', txt: num(x.salas) }]);
   }
   $('todo').appendChild(td);
+
+  // ACUMULADO. "personas" es la SUMA DE LOS ÚNICOS DE CADA DÍA y por eso dice
+  // eso y no "personas distintas": el que vuelve mañana cuenta dos veces. No
+  // hay forma de dar el número real — el hash del visitante cambia todas las
+  // noches, que es justamente lo que hace que esto no rastree a nadie. Para
+  // saber cuántos vuelven está la otra columna, que la marca el teléfono.
+  seccion('ACUMULADO (DESDE ' + (d.total.desde ? new Date(d.total.desde).toISOString().slice(0, 10) : '—') + ')');
+  const ac = document.createElement('div');
+  ac.className = 'cajas';
+  const picoMax = Math.max(...(d.picos || []).map((x) => x.pico), 0);
+  for (const [k, v, pie] of [
+    ['PERSONAS', d.total.gente, 'suma de días, con repetidos'],
+    ['SESIONES', d.total.visitas, 'aperturas'],
+    ['VUELVEN', d.total.vuelven, pct(d.total.vuelven, d.total.visitas) + ' de las sesiones'],
+    ['RÉCORD', picoMax, 'juntos a la vez'],
+  ]) {
+    const c = document.createElement('div');
+    c.className = 'caja';
+    const s = document.createElement('span'); s.textContent = k;
+    const n = document.createElement('b'); n.textContent = num(v);
+    const e = document.createElement('em'); e.textContent = ' ' + pie;
+    c.append(s, n, e);
+    ac.appendChild(c);
+  }
+  $('todo').appendChild(ac);
 
   $('sub').textContent = num(d.total.eventos) + ' eventos guardados · actualizado ' +
     new Date().toLocaleTimeString('es-GT');

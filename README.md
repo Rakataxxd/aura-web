@@ -358,6 +358,20 @@ Se anotan cuatro cosas — `visita`, `escaneo`, `clip`, `sala` — con un tope d
 
 `escaneo` se cuenta al arrancar la cuenta regresiva y no al tocar el botón: entre una cosa y la otra hay un permiso de cámara y 8MB de modelo, y ahí se cae media población. Lo que interesa medir es cuántos llegaron a escanear de verdad.
 
+### Quién vuelve, sin identificar a nadie
+
+El servidor no puede saberlo: el hash cambia todas las noches justamente para que no se pueda. Así que **lo dice el teléfono**. La primera visita deja una marca en su `localStorage` y a partir de ahí cada `visita` manda un sí o un no en `vuelve`. Se cuenta **cuántos** vuelven sin saber **quiénes**, y no hay ningún identificador que cruce días.
+
+En incógnito el `localStorage` se vacía al cerrar, así que ahí todos cuentan como nuevos: el número queda sesgado para abajo, que es mejor que inventarlo.
+
+### El pico: cuánta gente hubo a la vez
+
+Esto `eventos` no lo puede contestar solo — el máximo de un día es un **instante**, y si nadie mira el panel a las nueve de la noche ese instante no queda escrito en ningún lado. Por eso hay un **cron cada minuto** que mide los activos y guarda el techo de cada hora en `picos`.
+
+Cada minuto y no cada cinco porque un pico dura lo que dura: midiendo cada cinco, la mitad de las veces se cae en el valle. Una fila por hora y no por medición: 24 filas por día en vez de 1440, el máximo del día sale con `MAX()` sobre esas 24, y de yapa queda la curva por hora, que es la que dice a qué hora conviene postear. El `upsert` lleva `WHERE excluded.maximo > picos.maximo`, así que solo escribe cuando el número sube: un día sin gente no cuesta ni una escritura.
+
+**Lo que no hay y no va a haber:** un total real de personas distintas de todos los tiempos. El panel muestra "suma de días, con repetidos" y lo dice con esas palabras — el que vuelve mañana suma dos veces y no hay consulta que lo arregle, porque el hash de ayer y el de hoy son distintos a propósito. Para eso está la columna de los que vuelven.
+
 ### Dos secretos
 
 ```bash
@@ -378,6 +392,15 @@ Son **dos números distintos y salen de dos lados distintos**:
 - **los activos** son los que hicieron algo en los últimos diez minutos, y eso sale de `eventos`. El menú lo pide por `GET /api/online` cada 30s, solo con el menú o la espera a la vista y solo con la pestaña al frente, con 8s de cache en el worker.
 
 Mientras se juega no se pide nada: un request cada medio minuto por cada persona que dejó la página abierta se convierte en el pico de tráfico más grande del día sin que nadie lo mire. Con el plan gratis (100k requests/día en Workers, 100k escrituras/día en D1) eso importa el día que se vuelva a mover.
+
+### Y en la pantalla de espera, los dos
+
+Al que **ya está esperando** es a quien más le sirve el número, así que `BUSCANDO RIVAL` muestra los dos, y cada uno dice algo distinto:
+
+- `buscMsg` — la **cola**. Llega sola por el socket, así que es exacta y en vivo: *"3 esperando"*, o *"sos el único en la cola, pasá el link"*.
+- `buscOnline` — cuánta gente hay **en el escáner**. Es lo que decide si la espera tiene sentido: la cola vacía con veinte personas escaneando se aguanta noventa segundos; la cola vacía con nadie más, no, y ahí conviene armar una sala.
+
+Se pide **forzado** al entrar a la cola (`refrescarOnline(true)`) y no se espera al refresco de los 30s: se viene del menú, donde el número se acaba de pedir hace un instante, y el mínimo de 10s dejaba el spinner sin una sola cifra al lado justo en los primeros segundos, que son los que deciden si la persona se queda.
 
 ## Deploy
 

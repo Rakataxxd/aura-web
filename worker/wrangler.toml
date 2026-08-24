@@ -43,6 +43,17 @@ new_sqlite_classes = ["Sala", "Lobby"]
 #   ADMIN_CLAVE="loquesea"
 #   SAL_VISITANTE="otra-cosa-larga"
 
+# Reloj de la analitica. Cada minuto mide cuanta gente hay A LA VEZ y guarda el
+# techo de la hora (tabla `picos`). Cada minuto y no cada cinco porque un pico
+# dura lo que dura: midiendo cada cinco, la mitad de las veces se cae en el
+# valle y el maximo del dia sale mas chico de lo que fue.
+#
+# Son 1440 ejecuciones por dia. La consulta es un COUNT sobre el indice de `ts`
+# y solo ESCRIBE cuando el numero supera al de esa hora, asi que un dia sin
+# gente no cuesta ni una escritura.
+[triggers]
+crons = ["* * * * *"]
+
 [vars]
 # Origenes que pueden pegarle. Se compara EXACTO contra el header Origin.
 # Si publicas en otro lado, agregalo aca separado por coma.
