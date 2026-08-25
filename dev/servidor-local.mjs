@@ -25,15 +25,20 @@
 // Pages: aquel se compila con base `/aura-web/` porque vive en un subdirectorio,
 // y este va en la raiz de un dominio propio. Se construye con:
 //
-//   VITE_API_RANKING=https://auratester.com npx vite build --outDir dist-local --base=/
+//   npm run build:local
 //
-// Con esa variable el cliente le pega a su MISMO origen, asi que no hace falta
-// el `?api=` en la URL ni hay CORS de por medio.
+// que es `vite build --mode casa` y toma VITE_API_RANKING de `.env.casa`
+// (https://casa.auratester.com). Con eso el cliente le pega a su MISMO origen,
+// asi que no hace falta el `?api=` en la URL ni hay CORS de por medio.
+//
+// EL HOSTNAME ES `casa.auratester.com`, no el dominio pelado: desde el
+// 25-ago-2026 auratester.com y www los sirve Cloudflare Pages y este tunel
+// quedo como salida de emergencia nada mas.
 //
 // USO:
 //   1) npx wrangler dev --port 8787          (en worker/)
 //   2) node dev/servidor-local.mjs
-//   3) cloudflared --config <cfg> tunnel run auratester
+//   3) cloudflared --config <cfg> tunnel run          (dev/arrancar-local.bat hace las tres)
 //
 // OJO: esto vive mientras la PC este prendida.
 

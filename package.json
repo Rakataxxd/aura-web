@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "vite build && node scripts/publish.mjs"
+    "deploy": "vite build && node scripts/publish.mjs",
+    "deploy:pages": "node scripts/publish-pages.mjs",
+    "build:local": "vite build --mode casa --outDir dist-local --base=/"
   },
   "devDependencies": {
     "vite": "^8.2.0"

@@ -381,11 +381,33 @@ Mientras se juega no se pide nada: un request cada medio minuto por cada persona
 
 ## Deploy
 
+Hay **dos sitios y un backend**, y se publican por separado:
+
 ```bash
-npm run deploy
+npm run deploy         # gh-pages  -> rakataxxd.github.io/aura-web/
+npm run deploy:pages   # Cloudflare Pages -> auratester.com
+cd worker && npx wrangler deploy   # el backend -> api.auratester.com
 ```
 
-Compila y publica la rama `gh-pages`.
+### Por qué el sitio se mudó a Cloudflare Pages
+
+GitHub Pages tiene un límite blando de **100 GB al mes** y cada visitante nuevo se baja **8.5 MB** —el wasm de MediaPipe (3.5 MB) y el modelo (5.0 MB), ya comprimidos, medidos contra el sitio real—. Son unas **12.000 visitas al mes**, y después GitHub avisa y corta. El ancho de banda de Pages no se cobra, así que el techo del sitio deja de existir; el que queda es el del worker (100k requests/día).
+
+`gh-pages` se sigue publicando **a propósito**: es el espejo si Pages se cae, y el link viejo ya anda dando vueltas en capturas.
+
+Los dos builds no son el mismo:
+
+| | gh-pages | Pages |
+|---|---|---|
+| `base` | `/aura-web/` (vive en un subdirectorio) | `/` (raíz del dominio) |
+| backend | `.workers.dev` (`.env`) | `api.auratester.com` (`.env.pages`) |
+| cache | lo que decida GitHub | `public/_headers` |
+
+`public/_headers` es solo de Pages (GitHub lo ignora): el wasm y el modelo **no llevan hash en el nombre**, así que sin una regla el navegador los revalida en cada visita. Van a 30 días y no a un año con `immutable` justamente porque el nombre no cambia nunca — con un año, actualizar `@mediapipe/tasks-vision` dejaría el wasm viejo clavado en el teléfono de todo el que ya entró.
+
+### La salida de emergencia se mudó a `casa.auratester.com`
+
+`dev/arrancar-local.bat` (sitio + salas corriendo en la PC, para cuando se acaba la cuota de Durable Objects) ya no puede usar el dominio pelado: ese ahora lo sirve Pages. Vive en `casa.auratester.com`, y su build es `npm run build:local` (`--mode casa`, ver `.env.casa`).
 
 ## Rendimiento
 

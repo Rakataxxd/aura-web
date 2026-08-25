@@ -1,0 +1,13 @@
+# Reglas de cache para Cloudflare Pages (GitHub Pages ignora este archivo).
+#
+# El wasm de MediaPipe y el modelo son 8.5 MB comprimidos y NO llevan hash en
+# el nombre: sin esto el navegador los revalida en cada visita. Un mes, no un
+# año: como el nombre no cambia nunca, `immutable` a un año dejaria clavado el
+# wasm viejo en el telefono de todo el que ya entro el dia que se actualice
+# @mediapipe/tasks-vision.
+/mp/*
+  Cache-Control: public, max-age=2592000
+
+# Vite ya les pone hash en el nombre: cachearlos para siempre es seguro.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
