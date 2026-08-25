@@ -2,6 +2,19 @@ name = "aura-ranking"
 main = "src/index.js"
 compatibility_date = "2026-08-01"
 
+# El backend tiene nombre propio. `custom_domain` hace que wrangler cree solo
+# el registro DNS en la zona: no hay que tocar el panel.
+routes = [
+  { pattern = "api.auratester.com", custom_domain = true },
+]
+
+
+
+# OBLIGATORIO cuando hay `routes`: sin esto wrangler APAGA la url workers.dev,
+# y el sitio de GitHub Pages —que le pega ahi— se queda sin backend en el mismo
+# deploy. Ya paso una vez.
+workers_dev = true
+
 # El binding se llama DB en el codigo. `database_id` sale de crear la base:
 #   npx wrangler d1 create aura-ranking
 # y se pega aca. Despues, una sola vez:
