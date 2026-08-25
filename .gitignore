@@ -19,3 +19,4 @@ worker/.dev.vars
 
 # scratch de diagnostico (mosaicos de frames)
 .tmp
+dist-local/

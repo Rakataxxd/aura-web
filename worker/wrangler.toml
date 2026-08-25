@@ -46,4 +46,4 @@ new_sqlite_classes = ["Sala", "Lobby"]
 [vars]
 # Origenes que pueden pegarle. Se compara EXACTO contra el header Origin.
 # Si publicas en otro lado, agregalo aca separado por coma.
-ORIGENES = "https://rakataxxd.github.io,http://localhost:5199,http://localhost:5173"
+ORIGENES = "https://rakataxxd.github.io,https://auratester.com,https://www.auratester.com,http://localhost:5199,http://localhost:5173,http://127.0.0.1:8788"
