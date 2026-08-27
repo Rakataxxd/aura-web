@@ -2,7 +2,7 @@ import './style.css';
 import { createPose, createPoseWorker, openCamera, assignSlots, prefetchAssets, ajustesCamara } from './pose.js';
 import { Player } from './scoring.js';
 import { Renderer, P_COLOR, GOLD, BONE } from './render.js';
-import { Recorder, shareOrDownload } from './record.js';
+import { Recorder } from './record.js';
 import { Mosaico, debeContener } from './mosaico.js';
 import { detectDap, DAP, brazosCortados } from './moves.js';
 import { toMetric } from './landmarks.js';
@@ -10,6 +10,13 @@ import { verdictFor } from './roasts.js';
 import { hayApi, getAlias, setAlias, aliasValido, enviarPuntaje, traerRanking, nombrePais } from './ranking.js';
 import { Batalla, hayVersus, codigoNuevo, codigoValido, TOPE_SALA, CANCELADO } from './versus.js';
 import { hit, contarVisita, online as pedirOnline } from './analitica.js';
+import {
+  hayTorneos, codigoTorneoValido, crearTorneo, verTorneo, subirPuntajeTorneo,
+  subirClip, cerrarTorneo, urlClip, linkTorneo, linkOrganizador, torneoDeLaUrl,
+  cuantoFalta, getUltimo, setUltimo, guardarClave, soyOrganizador,
+} from './torneo.js';
+import { compartir, mensajeDe, hayCompartirNativo } from './compartir.js';
+import { bajarClips, soltarClips, armarRecopilatorio, duracionEstimada } from './reel.js';
 
 const ROUND_SECONDS = 15;
 const DEBUG = new URLSearchParams(location.search).has('debug');
@@ -37,16 +44,36 @@ const el = {
   online: $('online'),
   tabAmbito: $('tabAmbito'), tabPeriodo: $('tabPeriodo'),
   rankDonde: $('rankDonde'), tabla: $('tabla'), rankYo: $('rankYo'), rankVolver: $('rankVolver'),
+
+  // torneos de comunidad
+  crearMenu: $('crearMenu'), crearSala: $('crearSala'), crearTorneo: $('crearTorneo'),
+  irUltimoTorneo: $('irUltimoTorneo'),
+  nuevo: $('nuevo'), ntNombre: $('ntNombre'), ntQuien: $('ntQuien'), ntDias: $('ntDias'),
+  ntClips: $('ntClips'), ntClipsFila: $('ntClipsFila'), ntCrear: $('ntCrear'),
+  ntMsg: $('ntMsg'), ntVolver: $('ntVolver'),
+  torneo: $('torneo'), tTape: $('tTape'), tNombre: $('tNombre'), tSub: $('tSub'),
+  tCodigo: $('tCodigo'), tCodMsg: $('tCodMsg'), tTabla: $('tTabla'), tYo: $('tYo'),
+  tAlta: $('tAlta'), tAlias: $('tAlias'),
+  tFarmear: $('tFarmear'), tRecop: $('tRecop'), tCompartir: $('tCompartir'),
+  tOrg: $('tOrg'), tLinkOrg: $('tLinkOrg'), tCerrar: $('tCerrar'), tOrgMsg: $('tOrgMsg'),
+  tVolver: $('tVolver'),
+  recop: $('recop'), recTitulo: $('recTitulo'), recCaja: $('recCaja'), recVideo: $('recVideo'),
+  recPlaca: $('recPlaca'), recMsg: $('recMsg'), recProgCaja: $('recProgCaja'), recProg: $('recProg'),
+  recGenerar: $('recGenerar'), recBajar: $('recBajar'), recVolver: $('recVolver'),
+  rTorneo: $('rTorneo'), compartir: $('compartir'), shIg: $('shIg'), shTt: $('shTt'),
 };
 
-const PANELES = ['intro', 'loading', 'count', 'result', 'oops', 'rank', 'buscando'];
+const PANELES = ['intro', 'loading', 'count', 'result', 'oops', 'rank', 'buscando',
+  'nuevo', 'torneo', 'recop'];
 let panelesArriba = [];
 const show = (...ids) => {
   panelesArriba = ids;
   for (const k of PANELES) el[k].classList.toggle('hidden', !ids.includes(k));
   // Volver al menu es cuando mas importa el numero de gente en la cola: puede
   // haber entrado alguien mientras jugabas.
-  if (ids.includes('intro')) refrescarOnline();
+  // El submenu de CREAR se cierra al pasar por la portada: dejarlo abierto de
+  // la vez pasada hace que la pantalla arranque distinta cada vez.
+  if (ids.includes('intro')) { refrescarOnline(); el.crearMenu?.classList.add('hidden'); }
   // La barra de la sala y la grilla dependen de que haya arriba: un panel
   // opaco la tapa, y si la barra aparece o se va, los recuadros cambian de
   // alto.
@@ -873,8 +900,13 @@ async function finish() {
   // ENTRE RONDAS NO SE CIERRA NADA. Ni torneo, ni clip, ni botones: eso es el
   // final de una partida y la partida sigue. Lo unico que se ve es como quedo
   // la ronda y que viene la siguiente.
-  el.alta.classList.toggle('hidden', !dueloCerrado || !hayApi());
-  el.share.classList.toggle('hidden', !dueloCerrado);
+  // Jugando un torneo, el alta al ranking global no aparece: el puntaje ya se
+  // sube solo al torneo del streamer, con el nombre con el que entraste. Dos
+  // formularios de "anotate" en la misma pantalla, uno automatico y otro a
+  // mano, es la forma mas rapida de que nadie entienda en cual quedo.
+  el.alta.classList.toggle('hidden', !dueloCerrado || !hayApi() || !!torneoActivo);
+  el.compartir.classList.toggle('hidden', !dueloCerrado);
+  el.rTorneo.classList.add('hidden');
   el.again.classList.toggle('hidden', !dueloCerrado);
   el.backMenu.classList.toggle('hidden', !dueloCerrado);
   el.altaMsg.textContent = '';
@@ -899,13 +931,20 @@ async function finish() {
       : 'OTRA VEZ';
 
     if (blob) {
-      const puedeCompartir = navigator.canShare?.({ files: [new File([blob], 'x', { type: blob.type })] });
-      const que = mejorRonda.sala ? 'LA SALA' : 'CLIP';
-      el.share.textContent = `${puedeCompartir ? 'COMPARTIR' : 'DESCARGAR'} ${que}`;
+      // El tercer boton dice COMPARTIR o GUARDAR segun lo que vaya a pasar de
+      // verdad: en el telefono abre la hoja del sistema, en la computadora baja
+      // el archivo. Los de Instagram y TikTok no cambian de texto porque ahi lo
+      // que se promete es el destino, no el mecanismo.
+      el.share.textContent = hayCompartirNativo(blob) ? 'COMPARTIR' : 'GUARDAR';
     } else {
-      el.share.classList.add('hidden');
+      el.compartir.classList.add('hidden');
       el.rNote.textContent = 'Tu navegador no permite grabar. El escáner sí funcionó.';
     }
+
+    // El torneo del streamer se sube SOLO y sin que nadie toque nada: ya
+    // escribiste tu nombre al entrar, y pedirtelo de nuevo al final es
+    // exactamente donde se pierde la gente.
+    if (torneoActivo) anotarEnTorneo();
   }
   pintarClips();
   show('result');
@@ -1471,14 +1510,37 @@ async function siguienteRival() {
 }
 
 el.irAzar?.addEventListener('click', () => { startPrefetch(); buscarYEntrar(); });
+// CREAR ya no arma una sala de una: despliega las dos cosas que se pueden
+// crear. Se cierra al elegir y al volver al menu, para que la portada no quede
+// con el submenu abierto de la vez pasada.
+const cerrarCrear = () => el.crearMenu?.classList.add('hidden');
 el.irCrear?.addEventListener('click', () => {
   startPrefetch();
   el.introMsg.textContent = '';
+  el.crearMenu?.classList.toggle('hidden');
+});
+el.crearSala?.addEventListener('click', () => {
+  cerrarCrear();
+  startPrefetch();
   entrar(codigoNuevo(), 'privada');
 });
+el.crearTorneo?.addEventListener('click', () => {
+  cerrarCrear();
+  abrirNuevoTorneo();
+});
+
 el.vsEntrar?.addEventListener('click', () => {
   const c = el.vsCodigo.value.trim().toUpperCase();
-  if (!codigoValido(c)) { el.introMsg.textContent = 'El código son 4 letras o números.'; return; }
+  // El LARGO decide adonde va. Seis es un torneo, cuatro es una sala.
+  if (codigoTorneoValido(c)) {
+    el.introMsg.textContent = '';
+    abrirTorneo(c);
+    return;
+  }
+  if (!codigoValido(c)) {
+    el.introMsg.textContent = 'El código son 4 caracteres (sala) o 6 (torneo).';
+    return;
+  }
   el.introMsg.textContent = '';
   startPrefetch();
   entrar(c, 'privada');
@@ -1779,17 +1841,467 @@ el.again.addEventListener('click', async () => {
   recorder = new Recorder(el.canvas);
   countdown();
 });
-el.share.addEventListener('click', async () => {
+/**
+ * Los tres botones de compartir son el mismo camino con distinto texto.
+ *
+ * El aura del nombre del archivo es la de la ronda QUE SE ESTÁ BAJANDO (la
+ * mejor del duelo), no la de `players`, que ya se reinició al empezar otra.
+ */
+async function compartirRonda(red, boton) {
   if (!blob) return;
-  el.share.disabled = true;
-  // El aura del nombre del archivo es la de la ronda QUE SE ESTÁ BAJANDO (la
-  // mejor del duelo), no la de `players`, que ya se reinició al empezar otra.
-  const r = await shareOrDownload(
-    blob,
-    mejorRonda?.aura ?? Math.round(players[0].aura),
-    mejorRonda?.sala ? 'sala-aura' : 'mi-aura',
-  );
-  el.share.disabled = false;
-  hit('clip');
-  if (r === 'downloaded') el.rNote.textContent = 'Guardado. Subilo y etiquetame.';
+  const botones = [el.shIg, el.shTt, el.share];
+  botones.forEach((b) => { if (b) b.disabled = true; });
+  try {
+    const r = await compartir(blob, {
+      aura: mejorRonda?.aura ?? Math.round(players[0].aura),
+      puesto: miPuestoTorneo?.puesto,
+      total: miPuestoTorneo?.total,
+      torneo: torneoActivo ? torneoDatos?.organizador : '',
+    }, red);
+    hit('clip');
+    el.rNote.textContent = mensajeDe(r, red);
+  } finally {
+    botones.forEach((b) => { if (b) b.disabled = false; });
+    if (boton) boton.blur();
+  }
+}
+el.shIg?.addEventListener('click', (e) => compartirRonda('instagram', e.currentTarget));
+el.shTt?.addEventListener('click', (e) => compartirRonda('tiktok', e.currentTarget));
+el.share.addEventListener('click', (e) => compartirRonda('', e.currentTarget));
+
+// ============================================================================
+// TORNEOS DE COMUNIDAD
+//
+// El torneo de un streamer: el arma uno, lee el codigo en camara, y su gente
+// entra, farmea y sube en la tabla durante los dias que el puso.
+//
+// ES ASINCRONO Y ESO CAMBIA TODO. No hay sala, no hay socket, no hay nadie
+// esperando: se pide la tabla, se juega, se sube el puntaje. Por eso no usa
+// nada de versus.js —ni Durable Objects del lado del servidor, ver torneos.js—
+// y por eso escala a la comunidad entera de alguien y no a seis personas.
+// ============================================================================
+
+let torneoActivo = null;      // codigo en el que estoy jugando, o null
+let torneoDatos = null;       // ultima info que trajo el servidor
+let miPuestoTorneo = null;    // {puesto, total, aura} de la ronda recien subida
+
+// ---------- crear ----------
+
+function abrirNuevoTorneo() {
+  el.ntMsg.textContent = '';
+  el.ntNombre.value = '';
+  el.ntQuien.value = getAlias();
+  el.ntDias.value = '7';
+  el.ntCrear.disabled = false;
+  el.ntCrear.textContent = 'CREAR TORNEO';
+  show('nuevo');
+}
+
+el.ntVolver?.addEventListener('click', () => show('intro'));
+
+el.ntCrear?.addEventListener('click', async () => {
+  const nombre = el.ntNombre.value.trim();
+  const quien = el.ntQuien.value.trim();
+  const dias = Number(el.ntDias.value);
+
+  if (nombre.length < 3) {
+    el.ntMsg.textContent = 'Ponele un nombre al torneo (3 letras o más).';
+    el.ntNombre.focus();
+    return;
+  }
+  if (!aliasValido(quien)) {
+    el.ntMsg.textContent = 'Tu nombre va de 2 a 14 letras o números.';
+    el.ntQuien.focus();
+    return;
+  }
+  if (!Number.isFinite(dias) || dias < 1 || dias > 90) {
+    el.ntMsg.textContent = 'Los días van de 1 a 90.';
+    el.ntDias.focus();
+    return;
+  }
+
+  el.ntCrear.disabled = true;
+  el.ntCrear.textContent = 'CREANDO…';
+  el.ntMsg.textContent = '';
+  try {
+    const d = await crearTorneo({ nombre, organizador: quien, dias, clips: el.ntClips.checked });
+    // El nombre del organizador pasa a ser su alias por defecto: va a jugar en
+    // su propio torneo y no tiene por que escribirlo dos veces.
+    setAlias(quien);
+    // Se entra al torneo recien creado en vez de volver al menu: lo primero
+    // que necesita el organizador es el codigo a la vista para leerlo en camara.
+    await abrirTorneo(d.codigo, { aviso: d.avisoClips });
+  } catch (e) {
+    el.ntMsg.textContent = `No se pudo crear (${e.message}).`;
+    el.ntCrear.disabled = false;
+    el.ntCrear.textContent = 'REINTENTAR';
+  }
 });
+
+// ---------- ver el torneo ----------
+
+/**
+ * Trae y pinta un torneo.
+ *
+ * @param {string} codigo
+ * @param {object} opts `aviso` es un mensaje que sobrevive al pintado (lo usa
+ *   "creaste el torneo pero sin videos"), y `callado` no borra la tabla que ya
+ *   estaba —lo usa el refresco de despues de jugar, donde parpadear seria peor.
+ */
+async function abrirTorneo(codigo, { aviso = '', callado = false } = {}) {
+  const c = String(codigo).toUpperCase();
+  if (!codigoTorneoValido(c)) { alMenu('Ese código de torneo no es válido.'); return; }
+
+  show('torneo');
+  if (!callado) {
+    el.tNombre.textContent = 'CARGANDO…';
+    el.tSub.textContent = '';
+    el.tTabla.innerHTML = '';
+    el.tYo.textContent = '';
+    el.tCodigo.textContent = c;
+  }
+  el.tCodMsg.textContent = aviso || 'Tocá el código para copiar el link';
+  el.tCodMsg.classList.toggle('alerta', !!aviso);
+
+  try {
+    const d = await verTorneo(c, el.tAlias.value.trim() || getAlias());
+    torneoDatos = d;
+    setUltimo(c);
+    pintarTorneo(d);
+  } catch (e) {
+    el.tNombre.textContent = 'NO SE PUDO ABRIR';
+    el.tSub.textContent = e.message;
+    el.tTabla.innerHTML = '';
+    el.tCodigo.textContent = c;
+  }
+}
+
+const ESTADO_TXT = {
+  espera: 'TODAVÍA NO ARRANCA',
+  abierto: 'ABIERTO',
+  cerrado: 'TERMINADO',
+};
+
+function pintarTorneo(d) {
+  el.tTape.textContent = `TORNEO DE ${String(d.organizador).toUpperCase()}`;
+  el.tNombre.textContent = d.nombre;
+  el.tCodigo.textContent = d.codigo;
+
+  const cuando = d.estado === 'abierto' ? cuantoFalta(d.termina) : ESTADO_TXT[d.estado];
+  el.tSub.textContent = d.clips
+    ? `${cuando} · se guardan los videos del top ${d.topeClips}`
+    : `${cuando} · sin videos guardados`;
+
+  if (!el.tAlias.value) el.tAlias.value = getAlias();
+
+  // La tabla. El play solo aparece donde HAY video: prometer un play que no
+  // reproduce nada es peor que no ofrecerlo.
+  const mio = String(el.tAlias.value || getAlias()).trim().toLowerCase();
+  el.tTabla.innerHTML = d.filas.length
+    ? d.filas.map((f) => `<li class="${f.puesto <= 3 ? 'podio ' : ''}${String(f.alias).toLowerCase() === mio ? 'yo' : ''}">
+        <span class="pos">${f.puesto}</span>
+        <span class="quien">${escapar(f.alias)}${f.clip ? ' <em class="tiene-clip">▶</em>' : ''}</span>
+        <span class="cuanto">${Number(f.aura).toLocaleString('es-GT')}</span>
+      </li>`).join('')
+    : '<li><span class="vacio">TODAVÍA NO FARMEÓ NADIE.<br />SÉ EL PRIMERO.</span></li>';
+
+  el.tYo.textContent = d.yo
+    ? `Vos: puesto ${d.yo.puesto} de ${d.yo.total} · ${Number(d.yo.aura).toLocaleString('es-GT')} de aura.`
+    : '';
+
+  // Farmear solo se puede con el torneo abierto. Cerrado, el boton se queda
+  // pero dice por que no: desaparecido, la gente cree que se rompio.
+  const abierto = d.estado === 'abierto';
+  el.tFarmear.disabled = !abierto;
+  el.tFarmear.textContent = abierto
+    ? (d.yo ? 'FARMEAR DE NUEVO' : 'EMPEZAR A FARMEAR')
+    : (d.estado === 'espera' ? 'TODAVÍA NO ARRANCA' : 'EL TORNEO TERMINÓ');
+  el.tAlta.classList.toggle('hidden', !abierto);
+
+  // El recopilatorio necesita videos. Sin ninguno guardado no hay nada que ver.
+  const hayClips = d.clips && d.filas.some((f) => f.clip);
+  el.tRecop.classList.toggle('hidden', !hayClips);
+
+  el.tOrg.classList.toggle('hidden', !soyOrganizador(d.codigo));
+  el.tCerrar.classList.toggle('hidden', d.estado !== 'abierto');
+  el.tOrgMsg.textContent = '';
+}
+
+/** Copiar avisando en el propio boton: es el patron que ya usa la sala. */
+function copiarEn(boton, texto, dice = 'COPIADO') {
+  const antes = boton.textContent;
+  navigator.clipboard?.writeText(texto)
+    .then(() => {
+      boton.textContent = dice;
+      setTimeout(() => { boton.textContent = antes; }, 1400);
+    })
+    .catch(() => { el.tCodMsg.textContent = texto; });
+}
+
+el.tCodigo?.addEventListener('click', () => {
+  if (torneoDatos) copiarEn(el.tCodigo, linkTorneo(torneoDatos.codigo), 'LINK COPIADO');
+});
+
+el.tCompartir?.addEventListener('click', async () => {
+  if (!torneoDatos) return;
+  const texto = `Entrá al torneo de aura de ${torneoDatos.organizador}: "${torneoDatos.nombre}".\nCódigo ${torneoDatos.codigo}\n${linkTorneo(torneoDatos.codigo)}`;
+  // Aca si sirve el compartir nativo de TEXTO, que existe en todos lados (a
+  // diferencia del de archivos): manda el link por WhatsApp, Discord o donde
+  // el streamer tenga a su gente.
+  if (navigator.share) {
+    try { await navigator.share({ title: torneoDatos.nombre, text: texto }); return; }
+    catch (e) { if (e?.name === 'AbortError') return; }
+  }
+  copiarEn(el.tCompartir, texto, 'COPIADO');
+});
+
+el.tLinkOrg?.addEventListener('click', () => {
+  if (!torneoDatos) return;
+  copiarEn(el.tLinkOrg, linkOrganizador(torneoDatos.codigo), 'COPIADO — GUARDALO');
+  el.tOrgMsg.textContent = 'Ese link lleva tu clave adentro. Guardalo: es lo único que prueba que el torneo es tuyo.';
+});
+
+el.tCerrar?.addEventListener('click', async () => {
+  if (!torneoDatos) return;
+  // Cerrar es irreversible: nadie mas puede subir puntaje. Se pregunta.
+  if (!confirm(`¿Cerrar "${torneoDatos.nombre}" ahora? Nadie más va a poder farmear.`)) return;
+  el.tCerrar.disabled = true;
+  try {
+    await cerrarTorneo(torneoDatos.codigo);
+    el.tOrgMsg.textContent = 'Torneo cerrado. Los videos se guardan 7 días más.';
+    await abrirTorneo(torneoDatos.codigo, { callado: true });
+  } catch (e) {
+    el.tOrgMsg.textContent = `No se pudo cerrar (${e.message}).`;
+  } finally {
+    el.tCerrar.disabled = false;
+  }
+});
+
+el.tVolver?.addEventListener('click', () => { torneoActivo = null; show('intro'); });
+
+// ---------- farmear en el torneo ----------
+
+el.tFarmear?.addEventListener('click', () => {
+  const alias = el.tAlias.value.trim();
+  if (!aliasValido(alias)) {
+    el.tYo.textContent = 'Escribí tu nombre (2 a 14 letras o números) para entrar a la tabla.';
+    el.tAlias.focus();
+    return;
+  }
+  setAlias(alias);
+  torneoActivo = torneoDatos?.codigo || null;
+  if (!torneoActivo) return;
+  hit('torneo');
+  // Se sale de cualquier sala: el torneo es solitario, y una sala abierta
+  // dejaria la grilla y la barra encima de la pantalla del escaneo.
+  salirDeSala();
+  startPrefetch();
+  boot();
+});
+
+/**
+ * Sube la ronda al torneo. Se llama sola al cerrar la partida.
+ *
+ * EL ORDEN ES DELIBERADO: primero el puntaje (un JSON de nada, instantaneo) y
+ * DESPUES el video (14MB, puede tardar medio minuto). Asi el puesto aparece en
+ * pantalla enseguida y el archivo sube por atras. Al reves, el que tiene mala
+ * señal se queda mirando "subiendo…" y no ve nunca su puesto, que es lo unico
+ * que fue a buscar.
+ */
+async function anotarEnTorneo() {
+  const alias = getAlias();
+  if (!torneoActivo || !ultimaPartida || !aliasValido(alias)) return;
+
+  miPuestoTorneo = null;
+  el.rTorneo.classList.remove('hidden');
+  el.rTorneo.textContent = 'ANOTANDO EN EL TORNEO…';
+
+  let r;
+  try {
+    r = await subirPuntajeTorneo({ codigo: torneoActivo, alias, ...ultimaPartida });
+  } catch (e) {
+    el.rTorneo.textContent = `No se pudo anotar en el torneo (${e.message}).`;
+    return;
+  }
+
+  miPuestoTorneo = r.yo;
+  const org = String(r.torneo?.organizador || '').toUpperCase();
+  el.rTorneo.textContent = `PUESTO ${r.yo.puesto} DE ${r.yo.total}\nEN EL TORNEO DE ${org}`;
+
+  if (!r.subirClip || !blob) return;
+
+  // El video, por atras. Nada de esto bloquea: el puesto ya esta escrito.
+  const antes = el.rTorneo.textContent;
+  const res = await subirClip({
+    codigo: torneoActivo,
+    alias,
+    blob,
+    onProgreso: (p) => {
+      el.rTorneo.textContent = `${antes}\nGUARDANDO TU VIDEO… ${Math.round(p * 100)}%`;
+    },
+  });
+  el.rTorneo.textContent = antes;
+  // Que el video no entre no es un error que valga interrumpir a nadie: el
+  // puesto —lo que la persona vino a buscar— ya esta. Se dice y se sigue.
+  el.rNote.textContent = res.ok && res.guardado
+    ? 'Tu video quedó guardado en el torneo.'
+    : res.ok
+      ? 'Quedaste fuera del top: tu puesto cuenta, pero el video no se guarda.'
+      : `El puesto quedó anotado. El video no se pudo guardar (${res.error}).`;
+}
+
+// ---------- el recopilatorio ----------
+
+let clipsReel = [];
+let recopBlob = null;
+let reelIndice = 0;
+
+el.tRecop?.addEventListener('click', () => abrirRecop());
+
+/** Cuanto tarda en armarse, en minutos y siempre al menos 1. */
+const minutos = (clips) => Math.max(1, Math.ceil(duracionEstimada(clips) / 60));
+
+function abrirRecop() {
+  if (!torneoDatos) return;
+  recopBlob = null;
+  el.recTitulo.textContent = torneoDatos.nombre;
+  el.recBajar.classList.add('hidden');
+  el.recProgCaja.classList.add('hidden');
+  el.recGenerar.disabled = false;
+  el.recGenerar.classList.remove('hidden');
+
+  const conClip = torneoDatos.filas.filter((f) => f.clip).slice(0, torneoDatos.topeClips);
+  if (!conClip.length) {
+    el.recMsg.textContent = 'Todavía no hay videos guardados en este torneo.';
+    el.recGenerar.classList.add('hidden');
+    show('recop');
+    return;
+  }
+  el.recGenerar.textContent = `GENERAR EL VIDEO (${conClip.length} clips, ~${minutos(conClip)} min)`;
+  el.recMsg.textContent = `Los ${conClip.length} que más farmearon. Se reproducen uno tras otro.`;
+
+  // El reel arranca solo: es lo que el streamer quiere ver primero. El archivo
+  // es el paso siguiente y tarda minutos, asi que no puede ser el unico camino.
+  reelIndice = 0;
+  reproducirReel(conClip);
+  show('recop');
+}
+
+/**
+ * Reproduce los clips del top uno tras otro en el <video> de la pantalla.
+ *
+ * Se cambia el `src` del MISMO elemento en vez de tener uno por clip: diez
+ * <video> con 14MB cada uno es la forma mas rapida de que un telefono se
+ * quede sin memoria a mitad del reel.
+ */
+function reproducirReel(filas) {
+  const v = el.recVideo;
+  if (!filas.length) return;
+
+  const poner = (i) => {
+    reelIndice = ((i % filas.length) + filas.length) % filas.length;
+    const f = filas[reelIndice];
+    el.recPlaca.innerHTML = `<em>#${f.puesto}</em> ${escapar(f.alias)} · ${Number(f.aura).toLocaleString('es-GT')}`;
+    v.src = urlClip(torneoDatos.codigo, f.alias);
+    // `muted` para que el navegador deje arrancar sin gesto. El clip del
+    // escaneo solitario no tiene audio igual, asi que no se pierde nada.
+    v.muted = true;
+    v.play().catch(() => { /* que lo toque a mano */ });
+  };
+
+  v.onended = () => poner(reelIndice + 1);
+  v.onerror = () => { if (filas.length > 1) poner(reelIndice + 1); };
+  poner(0);
+}
+
+el.recGenerar?.addEventListener('click', async () => {
+  if (!torneoDatos) return;
+  const filas = torneoDatos.filas.filter((f) => f.clip).slice(0, torneoDatos.topeClips);
+  if (!filas.length) return;
+
+  // El reel de la pantalla se para: dos videos decodificando a la vez mientras
+  // se graba un canvas es justo lo que hace que el recopilatorio salga a
+  // saltos en un telefono.
+  el.recVideo.onended = null;
+  el.recVideo.pause();
+
+  el.recGenerar.disabled = true;
+  el.recProgCaja.classList.remove('hidden');
+  const barra = (p) => { el.recProg.style.width = `${Math.round(p * 100)}%`; };
+
+  try {
+    el.recGenerar.textContent = 'BAJANDO LOS VIDEOS…';
+    soltarClips(clipsReel);
+    clipsReel = await bajarClips(filas, (alias) => urlClip(torneoDatos.codigo, alias), barra);
+    if (!clipsReel.length) throw new Error('no se pudo bajar ningún video');
+
+    el.recGenerar.textContent = 'ARMANDO…';
+    const m = minutos(clipsReel);
+    el.recMsg.textContent = `Se arma en tiempo real: ~${m} minuto${m === 1 ? '' : 's'}. No cierres esta pantalla.`;
+    recopBlob = await armarRecopilatorio(clipsReel, torneoDatos.nombre, (p, que) => {
+      barra(p);
+      el.recGenerar.textContent = `ARMANDO… ${Math.round(p * 100)}% ${que || ''}`;
+    });
+
+    // Se muestra el resultado en el mismo reproductor: ver el archivo antes de
+    // subirlo es lo minimo, y ademas prueba que salio bien.
+    el.recVideo.onended = null;
+    el.recVideo.src = URL.createObjectURL(recopBlob);
+    el.recVideo.muted = false;
+    el.recPlaca.innerHTML = '<em>EL RECOPILATORIO</em>';
+    el.recMsg.textContent = 'Listo. Miralo y guardalo.';
+    el.recGenerar.classList.add('hidden');
+    el.recBajar.classList.remove('hidden');
+  } catch (e) {
+    el.recMsg.textContent = `No se pudo armar (${e.message}).`;
+    el.recGenerar.disabled = false;
+    el.recGenerar.textContent = 'REINTENTAR';
+  } finally {
+    el.recProgCaja.classList.add('hidden');
+    barra(0);
+  }
+});
+
+el.recBajar?.addEventListener('click', async () => {
+  if (!recopBlob) return;
+  el.recBajar.disabled = true;
+  const r = await compartir(recopBlob, {
+    aura: torneoDatos?.filas?.[0]?.aura || 0,
+    torneo: torneoDatos?.organizador,
+  }, '');
+  el.recBajar.disabled = false;
+  el.recMsg.textContent = mensajeDe(r, '') || 'Guardado.';
+});
+
+el.recVolver?.addEventListener('click', () => {
+  // Los objectURL se sueltan al salir: son 14MB cada uno y quedarse con diez
+  // colgados es medio giga de memoria retenida en el telefono del streamer.
+  el.recVideo.onended = null;
+  el.recVideo.pause();
+  el.recVideo.removeAttribute('src');
+  el.recVideo.load();
+  soltarClips(clipsReel);
+  clipsReel = [];
+  recopBlob = null;
+  show('torneo');
+});
+
+// ---------- entradas al torneo desde afuera ----------
+
+el.irUltimoTorneo?.addEventListener('click', () => abrirTorneo(getUltimo()));
+
+if (hayTorneos()) {
+  el.irCrear?.classList.remove('hidden');
+  // El atajo aparece solo si ya estuviste en uno.
+  if (codigoTorneoValido(getUltimo())) el.irUltimoTorneo?.classList.remove('hidden');
+
+  // Alguien abrio el link de un torneo. Se entra derecho, sin pasar por el
+  // menu: el que toca un link de torneo ya eligio adonde va.
+  const dela = torneoDeLaUrl();
+  if (dela) {
+    // La clave del link es la copia de seguridad del organizador: si viene,
+    // se guarda para que ESTE navegador pueda moderar y cerrar.
+    if (dela.clave) guardarClave(dela.codigo, dela.clave);
+    abrirTorneo(dela.codigo);
+  }
+}

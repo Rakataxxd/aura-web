@@ -61,3 +61,62 @@ CREATE TABLE IF NOT EXISTS eventos (
 CREATE INDEX IF NOT EXISTS ix_ev_dia   ON eventos (dia, tipo);
 CREATE INDEX IF NOT EXISTS ix_ev_ts    ON eventos (ts);
 CREATE INDEX IF NOT EXISTS ix_ev_quien ON eventos (dia, visitante);
+
+-- ============================================================================
+-- TORNEOS PRIVADOS (streamers / comunidades)
+--
+-- POR QUE NO SON DURABLE OBJECTS, COMO LAS SALAS. Una sala es EN VIVO: seis
+-- personas mirandose la cara al mismo tiempo, y eso necesita un objeto con
+-- estado que empuje mensajes. Un torneo no: entras con el codigo, farmeas
+-- cuando se te da la gana, subis tu puntaje y te vas. Nadie espera a nadie.
+-- Metido en un Durable Object seria un objeto prendido durante DIAS por cada
+-- torneo abierto, y el plan gratis da 13.000 GB-s al dia: dos torneos de una
+-- semana se comen la cuota y —esto ya paso— cuando se acaba, las salas y la
+-- cola contestan 500 TAMBIEN, porque comparten la misma bolsa. Un torneo de
+-- streamer es justo el caso que mas gente mete, asi que va en D1, que cobra
+-- por consulta y no por segundo.
+--
+-- UNA FILA POR PERSONA, y aca SI se pisa al mejorar. Es al reves que `runs`,
+-- donde se guarda una fila por partida a proposito (ver arriba). La diferencia
+-- no es capricho: en `runs` hay tres periodos (dia/semana/historico) y una
+-- partida floja de hoy igual puede ganar el ranking del dia, asi que hay que
+-- conservarlas todas. Un torneo es UN periodo —el que definio el organizador—
+-- y encima cada fila puede tener un video de 14MB colgando. Guardar todos los
+-- intentos serian mil videos por torneo para mostrar diez.
+CREATE TABLE IF NOT EXISTS torneos (
+  codigo      TEXT PRIMARY KEY,           -- 6 caracteres; las salas usan 4, ver abajo
+  nombre      TEXT NOT NULL,              -- "El torneo de Fulano"
+  organizador TEXT NOT NULL,              -- quien lo armo, se muestra
+  clave       TEXT NOT NULL,              -- secreto del organizador: moderar y cerrar
+  clips       INTEGER NOT NULL DEFAULT 0, -- 0/1, el opt-in de guardar los videos
+  tope_clips  INTEGER NOT NULL DEFAULT 10,-- cuantos videos se conservan (los mejores)
+  arranca     INTEGER NOT NULL,           -- epoch ms
+  termina     INTEGER NOT NULL,           -- epoch ms, lo elige el organizador
+  purga       INTEGER NOT NULL,           -- termina + 7 dias: cuando se borran los videos
+  pais        TEXT NOT NULL DEFAULT 'XX',
+  ts          INTEGER NOT NULL
+);
+
+-- `clip` es la llave en R2, o NULL. NULL no significa "no jugo": significa
+-- "no quedo entre los mejores" o "el torneo no guarda videos" o "la subida se
+-- corto". El puesto NUNCA depende del video —el puntaje se anota al instante y
+-- el archivo va despues, por atras— porque una subida de 14MB en datos moviles
+-- no puede costarte el puesto.
+CREATE TABLE IF NOT EXISTS torneo_runs (
+  codigo    TEXT    NOT NULL,
+  alias_key TEXT    NOT NULL,          -- normalizado, igual que en `runs`
+  alias     TEXT    NOT NULL,          -- como lo escribio
+  aura      INTEGER NOT NULL,          -- su RECORD en este torneo
+  moves     TEXT    NOT NULL DEFAULT '',
+  pais      TEXT    NOT NULL DEFAULT 'XX',
+  clip      TEXT,                      -- llave en R2 del video de esa marca, o NULL
+  intentos  INTEGER NOT NULL DEFAULT 1,
+  ts        INTEGER NOT NULL,          -- cuando hizo su record
+  PRIMARY KEY (codigo, alias_key)
+);
+
+-- El de la tabla del torneo. `codigo` primero porque es por lo que se filtra
+-- SIEMPRE, y despues el aura para que el ORDER BY salga del mismo indice.
+CREATE INDEX IF NOT EXISTS ix_t_rank  ON torneo_runs (codigo, aura DESC);
+-- Para el barrido que borra los videos vencidos, que mira solo la fecha.
+CREATE INDEX IF NOT EXISTS ix_t_purga ON torneos (purga);

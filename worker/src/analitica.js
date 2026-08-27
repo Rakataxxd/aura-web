@@ -13,7 +13,11 @@
 // volver a la persona. Ver `visitanteDe`.
 
 /** Lo unico que el cliente puede anotar. Lo que no este aca se tira. */
-const TIPOS = ['visita', 'escaneo', 'clip', 'sala'];
+// 'torneo' es entrar a un torneo de comunidad. Va separado de 'sala' porque
+// son cosas distintas: una sala son seis personas diez minutos y un torneo es
+// la comunidad entera de alguien durante una semana. Mezclarlos haria ilegible
+// justo el numero que dice si la funcion sirvio.
+const TIPOS = ['visita', 'escaneo', 'clip', 'sala', 'torneo'];
 
 /** Cuanto hace falta para dejar de estar "ahora". */
 const VENTANA_ONLINE = 10 * 60_000;
@@ -135,7 +139,8 @@ export async function resumen(env) {
               SUM(tipo = 'visita')  AS visitas,
               SUM(tipo = 'escaneo') AS escaneos,
               SUM(tipo = 'clip')    AS clips,
-              SUM(tipo = 'sala')    AS salas
+              SUM(tipo = 'sala')    AS salas,
+              SUM(tipo = 'torneo')  AS torneos
          FROM eventos GROUP BY dia ORDER BY dia DESC LIMIT 30`
     ),
     env.DB.prepare(

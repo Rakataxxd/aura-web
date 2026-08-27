@@ -56,15 +56,31 @@
       <h1>ESCÁNER<br /><em>DE AURA</em></h1>
       <p class="lede">Poné la cámara. Movete 15 segundos.<br />El escáner hace el resto.</p>
       <div class="acciones">
+        <!-- Un solo campo para las dos cosas: el LARGO del código decide.
+             Cuatro caracteres es una sala, seis es un torneo. Preguntarle a
+             alguien que acaba de recibir un código "¿esto es una sala o un
+             torneo?" es hacerle una pregunta cuya respuesta ya está en el
+             código. -->
         <div class="rank-alta hidden" id="filaCodigo">
-          <input id="vsCodigo" class="alias" maxlength="4" autocomplete="off"
+          <input id="vsCodigo" class="alias" maxlength="6" autocomplete="off"
                  autocapitalize="characters" spellcheck="false" placeholder="CÓDIGO" />
           <button class="btn small" id="vsEntrar">ENTRAR</button>
         </div>
         <button class="btn" id="go">ESCANEAR SOLO</button>
         <button class="btn hidden" id="irAzar">BUSCAR RIVAL</button>
-        <button class="btn hidden" id="irCrear">CREAR SALA</button>
+        <button class="btn hidden" id="irCrear">CREAR</button>
+        <!-- Se despliega al tocar CREAR. Antes ese botón armaba una sala de
+             una y ya: ahora hay dos cosas que crear y son muy distintas —una
+             dura minutos y son seis personas, la otra dura días y son miles—,
+             así que cada una se explica en su línea. -->
+        <div class="submenu hidden" id="crearMenu">
+          <button class="btn small" id="crearSala">SALA<em>hasta 6, en vivo</em></button>
+          <button class="btn small" id="crearTorneo">TORNEO<em>para tu comunidad</em></button>
+        </div>
         <button class="btn hidden" id="verRank">VER RANKING</button>
+        <!-- Atajo al torneo en el que ya estabas. Sin esto, volver a entrar
+             significa acordarse del código. -->
+        <button class="btn hidden" id="irUltimoTorneo">VOLVER A MI TORNEO</button>
       </div>
       <!-- Cuanta gente hay del otro lado. Va ANTES de tocar "BUSCAR RIVAL":
            entrar a una cola vacia y esperar noventa segundos a nadie es la
@@ -102,7 +118,27 @@
       </div>
       <p class="fine" id="altaMsg"></p>
 
-      <button class="btn" id="share">DESCARGAR CLIP</button>
+      <!-- Tu puesto en el torneo del streamer, si venías de uno. Es lo primero
+           que quiere ver el que compite y por eso va arriba de compartir: el
+           puesto es el motivo por el que se postea el video. -->
+      <p class="puesto-torneo hidden" id="rTorneo"></p>
+
+      <!-- COMPARTIR. En el teléfono los tres abren la hoja nativa del sistema
+           (es el único camino real de un video a IG o TikTok, ver compartir.js);
+           lo que cambia es el texto que se copia. En la computadora bajan el
+           archivo y abren la página de subir.
+           Van con el logo porque nadie busca "compartir": busca dónde postear. -->
+      <div class="compartir" id="compartir">
+        <button class="btn red ig" id="shIg">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.2" cy="6.8" r="1.3" class="lleno"/></svg>
+          INSTAGRAM
+        </button>
+        <button class="btn red tt" id="shTt">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.2 3v11.4a3.1 3.1 0 1 1-2.6-3.05" /><path d="M14.2 3c.4 2.3 2 3.9 4.4 4.1" /></svg>
+          TIKTOK
+        </button>
+        <button class="btn red" id="share">GUARDAR</button>
+      </div>
 
       <!-- Las otras rondas del duelo. La que da más risa no siempre es la que
            dio más aura, así que no se tiran. -->
@@ -150,6 +186,95 @@
       <ol class="tabla" id="tabla"></ol>
       <p class="fine" id="rankYo"></p>
       <button class="btn" id="rankVolver">VOLVER</button>
+    </section>
+
+    <!-- CREAR TORNEO -->
+    <section class="panel hidden" id="nuevo">
+      <div class="tape">TORNEO DE COMUNIDAD</div>
+      <h2>ARMÁ TU TORNEO</h2>
+      <p class="lede">Tu comunidad compite con un código.<br />Vos ponés cuánto dura.</p>
+
+      <div class="campos">
+        <label class="campo">
+          <span>NOMBRE DEL TORNEO</span>
+          <input id="ntNombre" class="alias ancho" maxlength="40" autocomplete="off"
+                 spellcheck="false" placeholder="El torneo de mi canal" />
+        </label>
+        <label class="campo">
+          <span>TU NOMBRE</span>
+          <input id="ntQuien" class="alias ancho" maxlength="14" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" placeholder="TU NOMBRE" />
+        </label>
+        <label class="campo">
+          <span>CUÁNTOS DÍAS DURA</span>
+          <input id="ntDias" class="alias ancho" type="number" min="1" max="90" value="7" />
+        </label>
+        <!-- El opt-in de los videos. Va con el precio escrito al lado: lo que
+             se guarda es el top 10 y siete días, y prometer más de lo que se
+             cumple es peor que no ofrecerlo. -->
+        <label class="check" id="ntClipsFila">
+          <input type="checkbox" id="ntClips" checked />
+          <span>Guardar los videos del <b>top 10</b> por <b>7 días</b> después de que termine</span>
+        </label>
+      </div>
+
+      <button class="btn" id="ntCrear">CREAR TORNEO</button>
+      <p class="fine alerta" id="ntMsg"></p>
+      <button class="btn" id="ntVolver">VOLVER</button>
+    </section>
+
+    <!-- TORNEO: la tabla, y el botón de ponerse a farmear -->
+    <section class="panel hidden" id="torneo">
+      <div class="tape" id="tTape">TORNEO</div>
+      <h2 id="tNombre">—</h2>
+      <p class="lede" id="tSub">—</p>
+
+      <!-- El código, grande y copiable: es lo que el streamer lee en cámara. -->
+      <button class="codigo-grande" id="tCodigo" title="Copiar el link">······</button>
+      <p class="fine" id="tCodMsg">Tocá el código para copiar el link</p>
+
+      <ol class="tabla" id="tTabla"></ol>
+      <p class="fine" id="tYo"></p>
+
+      <!-- El nombre va ANTES de jugar, no después. Es lo que permite que al
+           terminar la ronda el puntaje se suba solo y la pantalla final ya
+           diga el puesto: pedirlo al final es donde se pierde a la gente. -->
+      <div class="rank-alta" id="tAlta">
+        <input id="tAlias" class="alias" maxlength="14" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" placeholder="TU NOMBRE" />
+      </div>
+      <button class="btn" id="tFarmear">EMPEZAR A FARMEAR</button>
+      <button class="btn hidden" id="tRecop">VER EL RECOPILATORIO</button>
+      <button class="btn" id="tCompartir">COMPARTIR EL TORNEO</button>
+
+      <!-- Solo para el que lo armó. La clave vive en SU navegador. -->
+      <div class="organizador hidden" id="tOrg">
+        <p class="fine">SOS EL ORGANIZADOR</p>
+        <button class="btn small" id="tLinkOrg">COPIAR MI LINK DE ORGANIZADOR</button>
+        <button class="btn small rojo" id="tCerrar">CERRAR EL TORNEO YA</button>
+        <p class="fine" id="tOrgMsg"></p>
+      </div>
+
+      <button class="btn" id="tVolver">VOLVER</button>
+    </section>
+
+    <!-- RECOPILATORIO: el reel y el archivo -->
+    <section class="panel hidden" id="recop">
+      <div class="tape">LOS QUE MÁS FARMEARON</div>
+      <h2 id="recTitulo">—</h2>
+
+      <!-- El reel: se mira acá mismo, uno tras otro. -->
+      <div class="reel" id="recCaja">
+        <video id="recVideo" playsinline controls></video>
+        <div class="reel-placa" id="recPlaca"></div>
+      </div>
+      <p class="fine" id="recMsg"></p>
+
+      <div class="barra-prog hidden" id="recProgCaja"><div id="recProg"></div></div>
+
+      <button class="btn" id="recGenerar">GENERAR EL VIDEO</button>
+      <button class="btn hidden" id="recBajar">GUARDAR / COMPARTIR</button>
+      <button class="btn" id="recVolver">VOLVER</button>
     </section>
 
     <!-- ERROR -->

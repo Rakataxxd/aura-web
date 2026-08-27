@@ -164,7 +164,12 @@ function pintar(d) {
     ['ESCANEOS', hoy.escaneos, 'rondas'],
     ['CLIPS', hoy.clips, 'bajados'],
     ['SALAS', hoy.salas, 'entradas'],
-    ['TORNEO', tHoy.jugadores, num(tHoy.partidas || 0) + ' partidas'],
+    // Dos cosas distintas con nombres que se parecian demasiado: la de arriba
+    // es cuanta gente entro a un torneo de comunidad, y la de abajo cuantos se
+    // anotaron en la tabla global. La global se llama RANKING en todas partes
+    // desde que existen los torneos de verdad.
+    ['TORNEOS', hoy.torneos, 'entradas'],
+    ['RANKING', tHoy.jugadores, num(tHoy.partidas || 0) + ' anotados'],
   ];
   for (const [k, v, pie] of datos) {
     const c = document.createElement('div');

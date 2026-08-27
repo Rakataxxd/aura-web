@@ -38,6 +38,28 @@ class_name = "Lobby"
 tag = "v1"
 new_sqlite_classes = ["Sala", "Lobby"]
 
+# Los videos de los torneos duran 7 dias despues del cierre. Esto es lo que los
+# borra. Una vez por hora alcanza: no hay nadie esperando que desaparezcan.
+[triggers]
+crons = ["0 * * * *"]
+
+# VIDEOS DE LOS TORNEOS (R2). Va comentado A PROPOSITO.
+#
+# Con este bloque puesto y el bucket sin crear, `wrangler deploy` FALLA y se
+# cae el backend entero —ranking, salas y analitica— por una funcion opcional.
+# El codigo ya contempla que no exista: sin `env.CLIPS`, los torneos andan
+# igual y simplemente no guardan video (y al crear uno se avisa).
+#
+# PARA PRENDERLO, en este orden:
+#   1. habilitar R2 una sola vez en el dashboard (dash.cloudflare.com -> R2)
+#   2. npx wrangler r2 bucket create aura-clips
+#   3. descomentar las tres lineas de abajo
+#   4. npx wrangler deploy
+#
+# [[r2_buckets]]
+# binding = "CLIPS"
+# bucket_name = "aura-clips"
+
 # SECRETOS (no van acá: `[vars]` se publica en texto plano en el dashboard).
 # Se ponen una vez con:
 #   npx wrangler secret put ADMIN_CLAVE     # la clave del panel de /admin

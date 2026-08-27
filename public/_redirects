@@ -1,0 +1,12 @@
+# Rutas de Cloudflare Pages. GitHub Pages ignora este archivo (y por eso el
+# link de torneo tiene una segunda forma, `?t=CODIGO`, que funciona en los dos
+# lados; ver torneoDeLaUrl en src/torneo.js).
+#
+# El link que reparte un streamer es auratester.com/t/ABC123. Ese archivo no
+# existe: la app es una sola pagina y lee el codigo de la URL. Sin esta regla,
+# Pages contesta 404 y el link del torneo —lo que el streamer lee en camara—
+# no lleva a ningun lado.
+#
+# 200 y no 301: la barra de direcciones tiene que SEGUIR diciendo /t/ABC123,
+# porque es lo que la gente copia y vuelve a compartir.
+/t/*  /index.html  200

@@ -18,10 +18,21 @@
 //   GET  /admin                                el panel que lee eso
 //   WS   /api/cola                              cola de desconocidos (1v1)
 //   WS   /api/sala?codigo=XXXX[&max=N][&alias=x] sala de hasta 6
+//
+//   Torneos de comunidad (ver torneos.js). El codigo es de SEIS caracteres,
+//   contra los cuatro de las salas: el largo es lo que distingue uno de otro.
+//   POST /api/torneo         {nombre, organizador, dias, clips} -> {codigo, clave}
+//   GET  /api/torneo?codigo=XXXXXX[&alias=x][&limite=50]
+//   POST /api/torneo/score   {codigo, alias, aura, moves}
+//   PUT  /api/torneo/clip?codigo=X&alias=Y    el video, crudo en el cuerpo
+//   GET  /api/torneo/clip?codigo=X&alias=Y    para verlo
+//   POST /api/torneo/borrar  {codigo, alias, clave}    moderar
+//   POST /api/torneo/cerrar  {codigo, clave}           terminarlo antes
 
 import { Sala, Lobby, codigoValido } from './salas.js';
 import { anotar, online, esAdmin, resumen } from './analitica.js';
 import { PANEL } from './panel.js';
+import * as torneos from './torneos.js';
 export { Sala, Lobby };
 
 const LIMITE_MAX = 100;
@@ -50,7 +61,9 @@ function cors(req, env) {
   const ok = permitidos.includes(origen);
   return {
     'access-control-allow-origin': ok ? origen : permitidos[0] || '',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    // PUT es el del video del torneo: se manda crudo en el cuerpo, no como
+    // formulario, asi que el navegador le pide permiso al servidor por metodo.
+    'access-control-allow-methods': 'GET,POST,PUT,OPTIONS',
     'access-control-allow-headers': 'content-type',
     'access-control-max-age': '86400',
     vary: 'Origin',
@@ -192,6 +205,55 @@ export default {
         return json(await online(env), req, env);
       }
 
+      // --- torneos de comunidad ---
+      //
+      // Los modulos de torneo devuelven `{data}` o `{error, status}` en vez de
+      // una Response: asi no tienen que saber nada de CORS ni del formato, que
+      // vive todo aca. `resolver` es el unico puente.
+      if (url.pathname.startsWith('/api/torneo')) {
+        // El video se sirve aparte porque NO es JSON: es el archivo, con
+        // Range y con su propio 206/304.
+        if (url.pathname === '/api/torneo/clip' && req.method === 'GET') {
+          const res = await torneos.verClip(req, env, url);
+          if (!res) return json({ error: 'no hay video' }, req, env, 404);
+          for (const [k, v] of Object.entries(cors(req, env))) res.headers.set(k, v);
+          return res;
+        }
+
+        const resolver = (r) => (r.error
+          ? json({ error: r.error }, req, env, r.status || 400)
+          : json(r.data, req, env));
+
+        // Escribir exige venir del sitio. Leer no: la tabla de un torneo se
+        // mira desde donde sea (la pagina del reel, un iframe en el stream) y
+        // el codigo ya es el permiso.
+        const escribe = req.method === 'POST' || req.method === 'PUT';
+        if (escribe && !origenOk(req, env)) {
+          return json({ error: 'origen no permitido' }, req, env, 403);
+        }
+
+        const ahora = Date.now();
+        if (url.pathname === '/api/torneo' && req.method === 'POST') {
+          return resolver(await torneos.crear(req, env, { pais, ahora }));
+        }
+        if (url.pathname === '/api/torneo' && req.method === 'GET') {
+          return resolver(await torneos.info(env, url, ahora));
+        }
+        if (url.pathname === '/api/torneo/score' && req.method === 'POST') {
+          return resolver(await torneos.puntaje(req, env, { pais, ahora }));
+        }
+        if (url.pathname === '/api/torneo/clip' && req.method === 'PUT') {
+          return resolver(await torneos.guardarClip(req, env, url, ahora));
+        }
+        if (url.pathname === '/api/torneo/borrar' && req.method === 'POST') {
+          return resolver(await torneos.borrarEntrada(req, env));
+        }
+        if (url.pathname === '/api/torneo/cerrar' && req.method === 'POST') {
+          return resolver(await torneos.cerrar(req, env, ahora));
+        }
+        return json({ error: 'no existe' }, req, env, 404);
+      }
+
       if (url.pathname === '/api/score' && req.method === 'POST') {
         const body = await req.json().catch(() => null);
         if (!body) return json({ error: 'cuerpo invalido' }, req, env, 400);
@@ -244,5 +306,21 @@ export default {
       console.error('[ranking]', e?.message, e?.stack);
       return json({ error: 'error del servidor' }, req, env, 500);
     }
+  },
+
+  /**
+   * El barrido de los videos vencidos. Una vez por hora, no por minuto:
+   * lo unico que hace es borrar archivos que ya nadie puede ver, y correrlo
+   * cada minuto serian 43.200 invocaciones al mes contra las 100.000 diarias
+   * del plan gratis, para un trabajo que casi siempre no tiene nada que hacer.
+   *
+   * Sin R2 no hay nada que borrar y `purgar` sale en la primera linea.
+   */
+  async scheduled(evento, env, ctx) {
+    ctx.waitUntil(
+      torneos.purgar(env, Date.now())
+        .then((r) => { if (r.clips) console.log('[purga]', r.torneos, 'torneos,', r.clips, 'clips'); })
+        .catch((e) => console.error('[purga]', e?.message)),
+    );
   },
 };
