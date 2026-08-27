@@ -40,7 +40,8 @@ const el = {
   countnum: $('countnum'), loadmsg: $('loadmsg'), oopsmsg: $('oopsmsg'),
   rScore: $('rScore'), rTitle: $('rTitle'), rSub: $('rSub'), rStats: $('rStats'), rNote: $('rNote'),
   rTape: $('rTape'), rClips: $('rClips'), rClipsFila: $('rClipsFila'),
-  verRank: $('verRank'), alta: $('alta'), alias: $('alias'), subir: $('subir'), altaMsg: $('altaMsg'),
+  verRank: $('verRank'), altaMsg: $('altaMsg'), rPuesto: $('rPuesto'),
+  nombre: $('nombre'), nomInput: $('nomInput'), nomOk: $('nomOk'), nomMsg: $('nomMsg'), soy: $('soy'),
   online: $('online'),
   tabAmbito: $('tabAmbito'), tabPeriodo: $('tabPeriodo'),
   rankDonde: $('rankDonde'), tabla: $('tabla'), rankYo: $('rankYo'), rankVolver: $('rankVolver'),
@@ -53,7 +54,7 @@ const el = {
   ntMsg: $('ntMsg'), ntVolver: $('ntVolver'),
   torneo: $('torneo'), tTape: $('tTape'), tNombre: $('tNombre'), tSub: $('tSub'),
   tCodigo: $('tCodigo'), tCodMsg: $('tCodMsg'), tTabla: $('tTabla'), tYo: $('tYo'),
-  tAlta: $('tAlta'), tAlias: $('tAlias'),
+  tQuienSoy: $('tQuienSoy'),
   tFarmear: $('tFarmear'), tRecop: $('tRecop'), tCompartir: $('tCompartir'),
   tOrg: $('tOrg'), tLinkOrg: $('tLinkOrg'), tCerrar: $('tCerrar'), tOrgMsg: $('tOrgMsg'),
   tVolver: $('tVolver'),
@@ -63,7 +64,7 @@ const el = {
   rTorneo: $('rTorneo'), compartir: $('compartir'), shIg: $('shIg'), shTt: $('shTt'),
 };
 
-const PANELES = ['intro', 'loading', 'count', 'result', 'oops', 'rank', 'buscando',
+const PANELES = ['nombre', 'intro', 'loading', 'count', 'result', 'oops', 'rank', 'buscando',
   'nuevo', 'torneo', 'recop'];
 let panelesArriba = [];
 const show = (...ids) => {
@@ -900,12 +901,10 @@ async function finish() {
   // ENTRE RONDAS NO SE CIERRA NADA. Ni torneo, ni clip, ni botones: eso es el
   // final de una partida y la partida sigue. Lo unico que se ve es como quedo
   // la ronda y que viene la siguiente.
-  // Jugando un torneo, el alta al ranking global no aparece: el puntaje ya se
-  // sube solo al torneo del streamer, con el nombre con el que entraste. Dos
-  // formularios de "anotate" en la misma pantalla, uno automatico y otro a
-  // mano, es la forma mas rapida de que nadie entienda en cual quedo.
-  el.alta.classList.toggle('hidden', !dueloCerrado || !hayApi() || !!torneoActivo);
   el.compartir.classList.toggle('hidden', !dueloCerrado);
+  // Los dos puestos arrancan ocultos en cada ronda: son de la partida que se
+  // acaba de cerrar y los escribe quien los sube, no esta funcion.
+  el.rPuesto.classList.add('hidden');
   el.rTorneo.classList.add('hidden');
   el.again.classList.toggle('hidden', !dueloCerrado);
   el.backMenu.classList.toggle('hidden', !dueloCerrado);
@@ -925,7 +924,6 @@ async function finish() {
     // `players` se reinicia en "otra vez" y el alias se puede escribir en
     // cualquier momento, incluso con otra ronda ya empezando.
     ultimaPartida = { aura: mejorRonda.aura, moves: mejorRonda.moves };
-    prepararAlta();
     el.again.textContent = modo === 'versus' && batalla?.vivo
       ? (tipoSala === 'azar' ? 'OTRO RIVAL' : 'OTRA VEZ')
       : 'OTRA VEZ';
@@ -941,10 +939,11 @@ async function finish() {
       el.rNote.textContent = 'Tu navegador no permite grabar. El escáner sí funcionó.';
     }
 
-    // El torneo del streamer se sube SOLO y sin que nadie toque nada: ya
-    // escribiste tu nombre al entrar, y pedirtelo de nuevo al final es
-    // exactamente donde se pierde la gente.
-    if (torneoActivo) anotarEnTorneo();
+    // Todo se anota SOLO. El nombre se pidió al entrar a la app, así que acá
+    // no hay nada que tocar: el ranking global siempre, y encima el torneo del
+    // streamer si venías de uno. Van en ese orden y no en paralelo para que
+    // las dos líneas de puesto no se escriban peleándose la pantalla.
+    anotarEnRanking().then(() => { if (torneoActivo) anotarEnTorneo(); });
   }
   pintarClips();
   show('result');
@@ -1676,67 +1675,65 @@ if (hayVersus()) {
 // ---------- torneo ----------
 let ultimaPartida = null;     // {aura, moves} de la ronda recien cerrada
 let subida = null;            // respuesta del worker: {pais, region}
-let yaSubida = false;         // esta ronda ya se anoto
 let ambito = 'global', periodo = 'dia';
 
-function prepararAlta() {
-  el.alta.classList.toggle('hidden', !hayApi());
-  if (!hayApi()) return;
-  yaSubida = false;
-  el.alias.value = getAlias();
-  el.subir.disabled = false;
-  el.subir.textContent = 'ENTRAR AL TORNEO';
+/**
+ * Sube la ronda al ranking global. Se llama sola al cerrar la partida, en
+ * TODOS los modos: solo, duelo, sala y torneo.
+ *
+ * POR QUE YA NO HAY BOTON. Antes esto era un formulario en la pantalla de
+ * resultado: escribí tu nombre, tocá "ENTRAR AL TORNEO". El que acababa de
+ * sacar su puntaje tenía que ponerse a teclear para que contara, y el que no
+ * lo hacía —la enorme mayoría— desaparecía sin dejar rastro. Ahora el nombre
+ * se pide UNA vez, antes de entrar (ver la pantalla `nombre`), y desde ahí
+ * todo lo que se escanea entra solo.
+ *
+ * SE MANDA CADA RONDA, no solo las que superan tu récord. Parece de más y no
+ * lo es: el ranking tiene tres periodos y el servidor se queda con el MAX de
+ * cada uno (ver schema.sql). Una ronda floja de hoy no toca tu récord
+ * histórico pero puede ganar la tabla del día, y si no se manda, no existe.
+ * Lo que "se detecta automáticamente" es el mejor: eso lo hace la consulta,
+ * no el cliente.
+ */
+async function anotarEnRanking() {
+  const alias = getAlias();
+  if (!hayApi() || !ultimaPartida || !aliasValido(alias)) return;
+
+  el.rPuesto.classList.remove('hidden');
+  el.rPuesto.textContent = 'ANOTANDO…';
   el.altaMsg.textContent = '';
-}
-
-// El teclado del telefono ocupa media pantalla y se come el boton de
-// "ENTRAR AL TORNEO" justo cuando lo vas a tocar. Al enfocar el campo se
-// trae la fila entera a la vista; el timeout es porque iOS recien reajusta
-// el viewport DESPUES del focus.
-el.alias?.addEventListener('focus', () => {
-  setTimeout(() => el.alta?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
-});
-
-el.subir?.addEventListener('click', async () => {
-  // Ya anotada: el boton pasa a ser el atajo a la tabla. Volver a mandar la
-  // misma ronda crearia una fila duplicada con el mismo puntaje.
-  if (yaSubida) { abrirRanking(); return; }
-
-  const alias = el.alias.value.trim();
-  if (!aliasValido(alias)) {
-    el.altaMsg.textContent = 'El nombre va de 2 a 14 letras o números.';
-    el.alias.focus();
-    return;
-  }
-  if (!ultimaPartida) return;
-  setAlias(alias);
-  el.subir.disabled = true;
-  el.subir.textContent = 'SUBIENDO…';
-  el.altaMsg.textContent = '';
-  // Con el backend lento o caido eran seis segundos de "SUBIENDO…" sin una
-  // sola señal de vida, y desde afuera eso es indistinguible de colgado.
+  // Con el backend lento o caido son seis segundos sin una sola señal de vida,
+  // y desde afuera eso es indistinguible de colgado.
   const lento = setTimeout(() => { el.altaMsg.textContent = 'Tardando más de lo normal…'; }, 2200);
   try {
     subida = await enviarPuntaje({ alias, ...ultimaPartida });
-    yaSubida = true;
-    el.altaMsg.textContent = 'Anotado.';
-    // El ambito arranca en el mas chico que tenga sentido: verse primero
-    // entre los del barrio engancha mas que ser el puesto 4.000 del mundo.
-    ambito = subida.region ? 'region' : 'pais';
+    // El ambito arranca en el mas chico que tenga sentido: verse primero entre
+    // los del barrio engancha mas que ser el puesto 4.000 del mundo.
+    ambito = subida.ambito || (subida.region ? 'region' : 'pais');
     periodo = 'dia';
-    abrirRanking();
+    if (subida.yo) {
+      const donde = ambito === 'region'
+        ? (subida.region || nombrePais(subida.pais)).toUpperCase()
+        : nombrePais(subida.pais);
+      el.rPuesto.textContent = `PUESTO ${subida.yo.puesto} DE ${subida.yo.total}
+HOY EN ${donde}`;
+      // Tu mejor marca del dia, si la de esta ronda no la alcanzo. Sin esto,
+      // ver "puesto 3" despues de una ronda floja se lee como un error.
+      el.altaMsg.textContent = subida.yo.aura > ultimaPartida.aura
+        ? `Tu mejor de hoy sigue siendo ${subida.yo.aura.toLocaleString('es-GT')}.`
+        : '';
+    } else {
+      el.rPuesto.textContent = 'ANOTADO EN EL RANKING';
+    }
   } catch (e) {
-    el.altaMsg.textContent = `No se pudo subir (${e.message}). Tu puntaje no se perdió, probá de nuevo.`;
+    // Que no entre al ranking no puede robarle la pantalla a nadie: el puntaje
+    // ya esta en grande arriba y el clip se puede compartir igual.
+    el.rPuesto.classList.add('hidden');
+    el.altaMsg.textContent = `No se pudo anotar en el ranking (${e.message}).`;
   } finally {
     clearTimeout(lento);
-    // PASE LO QUE PASE el boton vuelve a estar vivo. Sin este `finally` se
-    // quedaba en "SUBIENDO…" y deshabilitado despues de un alta EXITOSA: la
-    // ronda se anotaba bien, pero al tocar VOLVER desde la tabla el boton
-    // seguia gris y parecia colgado.
-    el.subir.disabled = false;
-    el.subir.textContent = yaSubida ? 'VER MI PUESTO' : 'REINTENTAR';
   }
-});
+}
 
 /** Las pestañas de ambito dependen de si el worker supo de donde jugás. */
 function sincronizarTabs() {
@@ -1964,7 +1961,7 @@ async function abrirTorneo(codigo, { aviso = '', callado = false } = {}) {
   el.tCodMsg.classList.toggle('alerta', !!aviso);
 
   try {
-    const d = await verTorneo(c, el.tAlias.value.trim() || getAlias());
+    const d = await verTorneo(c, getAlias());
     torneoDatos = d;
     setUltimo(c);
     pintarTorneo(d);
@@ -1992,11 +1989,11 @@ function pintarTorneo(d) {
     ? `${cuando} · se guardan los videos del top ${d.topeClips}`
     : `${cuando} · sin videos guardados`;
 
-  if (!el.tAlias.value) el.tAlias.value = getAlias();
+  el.tQuienSoy.textContent = getAlias() ? `Vas a farmear como ${getAlias()}.` : '';
 
   // La tabla. El play solo aparece donde HAY video: prometer un play que no
   // reproduce nada es peor que no ofrecerlo.
-  const mio = String(el.tAlias.value || getAlias()).trim().toLowerCase();
+  const mio = String(getAlias()).trim().toLowerCase();
   el.tTabla.innerHTML = d.filas.length
     ? d.filas.map((f) => `<li class="${f.puesto <= 3 ? 'podio ' : ''}${String(f.alias).toLowerCase() === mio ? 'yo' : ''}">
         <span class="pos">${f.puesto}</span>
@@ -2016,7 +2013,6 @@ function pintarTorneo(d) {
   el.tFarmear.textContent = abierto
     ? (d.yo ? 'FARMEAR DE NUEVO' : 'EMPEZAR A FARMEAR')
     : (d.estado === 'espera' ? 'TODAVÍA NO ARRANCA' : 'EL TORNEO TERMINÓ');
-  el.tAlta.classList.toggle('hidden', !abierto);
 
   // El recopilatorio necesita videos. Sin ninguno guardado no hay nada que ver.
   const hayClips = d.clips && d.filas.some((f) => f.clip);
@@ -2082,13 +2078,10 @@ el.tVolver?.addEventListener('click', () => { torneoActivo = null; show('intro')
 // ---------- farmear en el torneo ----------
 
 el.tFarmear?.addEventListener('click', () => {
-  const alias = el.tAlias.value.trim();
-  if (!aliasValido(alias)) {
-    el.tYo.textContent = 'Escribí tu nombre (2 a 14 letras o números) para entrar a la tabla.';
-    el.tAlias.focus();
-    return;
-  }
-  setAlias(alias);
+  // El nombre ya esta: no se puede llegar hasta aca sin pasar por la pantalla
+  // que lo pide. El chequeo queda igual por si alguien borro el localStorage
+  // con la pestaña abierta.
+  if (!aliasValido(getAlias())) { pedirNombre(); return; }
   torneoActivo = torneoDatos?.codigo || null;
   if (!torneoActivo) return;
   hit('torneo');
@@ -2294,14 +2287,89 @@ if (hayTorneos()) {
   el.irCrear?.classList.remove('hidden');
   // El atajo aparece solo si ya estuviste en uno.
   if (codigoTorneoValido(getUltimo())) el.irUltimoTorneo?.classList.remove('hidden');
+}
 
-  // Alguien abrio el link de un torneo. Se entra derecho, sin pasar por el
-  // menu: el que toca un link de torneo ya eligio adonde va.
-  const dela = torneoDeLaUrl();
-  if (dela) {
-    // La clave del link es la copia de seguridad del organizador: si viene,
-    // se guarda para que ESTE navegador pueda moderar y cerrar.
-    if (dela.clave) guardarClave(dela.codigo, dela.clave);
-    abrirTorneo(dela.codigo);
+// ============================================================================
+// EL NOMBRE, UNA SOLA VEZ
+//
+// Es lo primero que se ve y no se vuelve a preguntar nunca. Todo lo que se
+// escanee después —solo, duelo, sala o torneo— se anota en el ranking con
+// este nombre, sin que haya que tocar nada al terminar.
+//
+// POR QUE ESTA ES LA DECISION IMPORTANTE. Antes el nombre se pedía DESPUES,
+// en la pantalla de resultado, junto a un botón de "ENTRAR AL TORNEO": justo
+// cuando la persona acaba de ver su puntaje y lo único que quiere es
+// compartirlo. El que no se ponía a teclear ahí —la enorme mayoría—
+// desaparecía sin dejar rastro, y por eso la tabla `runs` sólo veía a una
+// minoría de los que escaneaban (~59 de varios cientos el día del pico de
+// Instagram, ver el panel de /admin). Pedirlo al entrar cuesta una pantalla
+// una vez y hace que TODOS entren al ranking.
+// ============================================================================
+
+// Qué hacer cuando termine de escribir el nombre. Existe porque se puede
+// llegar acá desde un link de torneo: primero el nombre, después el destino
+// que la persona pidió, sin perderlo en el camino.
+let despuesDelNombre = null;
+
+function pedirNombre(luego = null) {
+  despuesDelNombre = luego;
+  el.nomInput.value = getAlias();
+  el.nomMsg.textContent = '';
+  show('nombre');
+  // El foco va con retraso a propósito: en iOS, enfocar un campo mientras el
+  // panel todavía está apareciendo abre el teclado sobre una pantalla a medio
+  // dibujar y el layout queda cortado.
+  setTimeout(() => el.nomInput?.focus(), 120);
+}
+
+/** Pinta "jugás como X" en la portada. Es el único lugar donde se cambia. */
+function pintarSoy() {
+  const a = getAlias();
+  el.soy.classList.toggle('hidden', !a);
+  if (a) el.soy.textContent = `jugás como ${a} · cambiar`;
+}
+
+function guardarNombre() {
+  const n = el.nomInput.value.trim();
+  if (!aliasValido(n)) {
+    el.nomMsg.textContent = 'De 2 a 14 letras o números.';
+    el.nomInput.focus();
+    return;
   }
+  setAlias(n);
+  pintarSoy();
+  // Los recuadros de la sala muestran el nombre: si se cambió estando adentro
+  // de una, hay que repintarlos o sigue el viejo hasta la próxima ronda.
+  if (batalla?.vivo) pintarSala();
+  const luego = despuesDelNombre;
+  despuesDelNombre = null;
+  if (luego) luego(); else show('intro');
+}
+
+el.nomOk?.addEventListener('click', guardarNombre);
+// El teclado del teléfono muestra "listo" y hay que poder usarlo.
+el.nomInput?.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') guardarNombre(); });
+el.soy?.addEventListener('click', () => pedirNombre());
+
+// ---------- por dónde arranca la app ----------
+//
+// Tres caminos, en este orden:
+//   1. sin nombre               -> se pide, y después se sigue
+//   2. con nombre y link de torneo -> derecho al torneo
+//   3. con nombre, sin link     -> la portada de siempre
+//
+// Va al FINAL del archivo porque necesita que todo lo demás esté definido:
+// `abrirTorneo` y `pedirNombre` son de este módulo y se llaman acá mismo.
+{
+  const dela = hayTorneos() ? torneoDeLaUrl() : null;
+  // La clave del link es la copia de seguridad del organizador: si viene, se
+  // guarda para que ESTE navegador pueda moderar y cerrar. Se hace antes de
+  // cualquier bifurcación: no puede depender de si hay nombre o no.
+  if (dela?.clave) guardarClave(dela.codigo, dela.clave);
+
+  const destino = dela ? () => abrirTorneo(dela.codigo) : () => show('intro');
+
+  pintarSoy();
+  if (aliasValido(getAlias())) destino();
+  else pedirNombre(destino);
 }

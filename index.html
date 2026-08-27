@@ -50,8 +50,25 @@
       <button class="chip rojo" id="btnSalir">SALIR</button>
     </div>
 
+    <!-- NOMBRE: lo primero que se ve, UNA sola vez.
+         Antes el nombre se pedía al final de la ronda, en la pantalla de
+         resultado, y con un botón de "ENTRAR AL TORNEO" que había que tocar:
+         el que acababa de sacar su puntaje tenía que ponerse a escribir para
+         que contara. Ahora se pregunta antes de entrar, se guarda, y a partir
+         de ahí TODO lo que escaneás entra al ranking solo. -->
+    <section class="panel" id="nombre">
+      <div class="tape">IDENTIFICATE</div>
+      <h1>¿CÓMO<br /><em>TE LLAMÁS?</em></h1>
+      <p class="lede">Con este nombre vas a aparecer<br />en el ranking y en los torneos.</p>
+      <input id="nomInput" class="alias ancho grande" maxlength="14" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" placeholder="TU NOMBRE" />
+      <button class="btn" id="nomOk">EMPEZAR</button>
+      <p class="fine alerta" id="nomMsg"></p>
+      <p class="fine">Se guarda en tu teléfono. Lo podés cambiar cuando quieras.</p>
+    </section>
+
     <!-- INTRO -->
-    <section class="panel" id="intro">
+    <section class="panel hidden" id="intro">
       <div class="tape">SISTEMA DE MEDICIÓN NO CERTIFICADO</div>
       <h1>ESCÁNER<br /><em>DE AURA</em></h1>
       <p class="lede">Poné la cámara. Movete 15 segundos.<br />El escáner hace el resto.</p>
@@ -87,6 +104,10 @@
            forma mas rapida de que alguien cierre la pagina y no vuelva. -->
       <p class="fine online hidden" id="online"></p>
       <p class="fine alerta" id="introMsg"></p>
+      <!-- Quién sos, y la salida para cambiarlo. El nombre ya no se pide nunca
+           más, así que tiene que haber UN lugar donde se vea y se pueda tocar:
+           si no, el que se equivocó al escribirlo queda preso de su error. -->
+      <button class="fine soy hidden" id="soy"></button>
       <p class="fine" id="note">El escáner corre en tu teléfono. En batalla, el video va directo al rival.</p>
     </section>
 
@@ -110,18 +131,14 @@
       <ol class="tabla sala hidden" id="rSala"></ol>
       <div class="stats" id="rStats"></div>
 
-      <!-- alta al torneo: solo aparece si hay backend configurado -->
-      <div class="rank-alta hidden" id="alta">
-        <input id="alias" class="alias" maxlength="14" autocomplete="off"
-               autocapitalize="characters" spellcheck="false" placeholder="TU NOMBRE" />
-        <button class="btn small" id="subir">ENTRAR AL TORNEO</button>
-      </div>
-      <p class="fine" id="altaMsg"></p>
-
-      <!-- Tu puesto en el torneo del streamer, si venías de uno. Es lo primero
-           que quiere ver el que compite y por eso va arriba de compartir: el
-           puesto es el motivo por el que se postea el video. -->
+      <!-- El puesto, automático. Ya no hay formulario que llenar acá: el
+           nombre se pidió al entrar y el puntaje se sube solo al terminar.
+           `rPuesto` es el ranking global y `rTorneo` el del streamer, si venías
+           de uno. Van arriba de compartir porque el puesto es el motivo por el
+           que alguien postea el video. -->
+      <p class="puesto-rank hidden" id="rPuesto"></p>
       <p class="puesto-torneo hidden" id="rTorneo"></p>
+      <p class="fine" id="altaMsg"></p>
 
       <!-- COMPARTIR. En el teléfono los tres abren la hoja nativa del sistema
            (es el único camino real de un video a IG o TikTok, ver compartir.js);
@@ -236,13 +253,10 @@
       <ol class="tabla" id="tTabla"></ol>
       <p class="fine" id="tYo"></p>
 
-      <!-- El nombre va ANTES de jugar, no después. Es lo que permite que al
-           terminar la ronda el puntaje se suba solo y la pantalla final ya
-           diga el puesto: pedirlo al final es donde se pierde a la gente. -->
-      <div class="rank-alta" id="tAlta">
-        <input id="tAlias" class="alias" maxlength="14" autocomplete="off"
-               autocapitalize="characters" spellcheck="false" placeholder="TU NOMBRE" />
-      </div>
+      <!-- Acá no se pide el nombre: ya se pidió al entrar a la app y es el
+           mismo en todos lados. Se muestra cuál es, para que nadie farmee
+           media hora y después descubra que quedó anotado como otra cosa. -->
+      <p class="fine" id="tQuienSoy"></p>
       <button class="btn" id="tFarmear">EMPEZAR A FARMEAR</button>
       <button class="btn hidden" id="tRecop">VER EL RECOPILATORIO</button>
       <button class="btn" id="tCompartir">COMPARTIR EL TORNEO</button>

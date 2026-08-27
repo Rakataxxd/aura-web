@@ -275,11 +275,25 @@ export default {
            VALUES (?,?,?,?,?,?,?,?,?)`
         ).bind(alias, clave(alias), aura, pais, region, moves, hoy.dia, hoy.semana, ts).run();
 
-        // Aca NO se devuelven los nueve puestos (3 periodos x 3 ambitos).
-        // Cada uno cuesta tres consultas y serian 27 en un solo POST, que en
-        // D1 es una barbaridad para algo que la pantalla ni muestra junto:
-        // el ranking se abre por pestaña y cada pestaña ya pide su `yo`.
-        return json({ ok: true, aura, pais, region }, req, env);
+        // UN puesto, no los nueve (3 periodos x 3 ambitos). Cada uno cuesta
+        // tres consultas y serian 27 en un solo POST, que en D1 es una
+        // barbaridad para algo que la pantalla ni muestra junto: el ranking se
+        // abre por pestaña y cada pestaña ya pide su `yo`.
+        //
+        // POR QUE UNO Y NO NINGUNO. Desde que el puntaje se sube solo al
+        // terminar la ronda, la pantalla de resultado tiene que poder decir el
+        // puesto sin pedir nada mas: la alternativa era un segundo request por
+        // cada escaneo, y el escaneo es lo que hace TODA la gente.
+        //
+        // El ambito es el mas chico que tenga sentido, y el periodo es hoy:
+        // verse primero entre los del barrio engancha mas que ser el 4.000 del
+        // mundo, y "hoy" es la unica tabla donde alguien que recien entra puede
+        // aparecer arriba.
+        const ambitoYo = region ? 'region' : 'pais';
+        const yo = await puestoDe(env, filtro({ ambito: ambitoYo, periodo: 'dia', pais, region, hoy }), clave(alias))
+          .catch(() => null);
+
+        return json({ ok: true, aura, pais, region, ambito: ambitoYo, yo }, req, env);
       }
 
       if (url.pathname === '/api/ranking' && req.method === 'GET') {

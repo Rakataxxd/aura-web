@@ -618,3 +618,48 @@ h2 {
   background: var(--acid);
   transition: width .25s linear;
 }
+
+/* ---------- el nombre, una sola vez ---------- */
+
+/* El campo de la primera pantalla. Más grande que el resto de los inputs
+   porque es LO ÚNICO que hay que hacer ahí: si se ve igual que un campo
+   cualquiera, la pantalla parece un formulario y no una pregunta. */
+.alias.grande {
+  font-size: 20px;
+  padding: 14px 18px;
+  text-align: center;
+  width: min(300px, 82vw);
+}
+
+/* "jugás como X · cambiar". Discreto: es una salida, no una acción que haya
+   que tomar. Con área de toque de sobra, que en un teléfono un renglón de
+   11px es imposible de acertar. */
+.soy {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  opacity: .5;
+  cursor: pointer;
+  padding: 8px 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: opacity .12s, color .12s;
+}
+.soy:hover { opacity: 1; color: var(--acid); }
+
+/* El puesto en el ranking global. Hueso y no ácido: el del torneo (que va
+   justo abajo, en verde) es el que tiene que ganar cuando están los dos. */
+.puesto-rank {
+  font-family: "Archivo Black", sans-serif;
+  font-size: 14px;
+  color: var(--bone);
+  line-height: 1.35;
+  white-space: pre-line;
+}
+
+/* El título de esta pantalla ("¿CÓMO TE LLAMÁS?") es bastante más largo que
+   "ESCÁNER DE AURA", y con el clamp de h1 a 104px ocupaba dos renglones muy
+   apretados contra los bordes. No es un desbordamiento —está centrado— pero
+   respira mejor un escalón más chico. */
+#nombre h1 { font-size: clamp(38px, 11vw, 72px); }
