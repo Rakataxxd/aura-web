@@ -2157,6 +2157,9 @@ const minutos = (clips) => Math.max(1, Math.ceil(duracionEstimada(clips) / 60));
 function abrirRecop() {
   if (!torneoDatos) return;
   recopBlob = null;
+  // Se limpia lo que pudo haber dejado un intento anterior que se rindio.
+  el.recCaja.classList.remove('hidden');
+  el.recMsg.classList.remove('alerta');
   el.recTitulo.textContent = torneoDatos.nombre;
   el.recBajar.classList.add('hidden');
   el.recProgCaja.classList.add('hidden');
@@ -2191,7 +2194,40 @@ function reproducirReel(filas) {
   const v = el.recVideo;
   if (!filas.length) return;
 
+  // CUANTOS FALLARON SEGUIDOS. Sin esto, `onerror` saltaba al siguiente sin
+  // llevar la cuenta: si NINGUN clip cargaba —el servidor caido, el navegador
+  // bloqueando la petición, la red del teléfono— el reel giraba para siempre
+  // mostrando un spinner y cambiando de nombre, sin decir nunca que algo
+  // estaba mal. Una falla infinita y muda es peor que una falla.
+  let fallosSeguidos = 0;
+  let reloj = 0;
+
+  const rendirse = () => {
+    clearTimeout(reloj);
+    v.onended = null; v.onerror = null; v.oncanplay = null;
+    v.removeAttribute('src');
+    v.load();
+    el.recCaja.classList.add('hidden');
+    el.recMsg.textContent = 'No se pudieron cargar los videos de este torneo. '
+      + 'Puede ser tu conexión, o una extensión del navegador bloqueando el video.';
+    el.recMsg.classList.add('alerta');
+    // El recopilatorio baja los mismos archivos: si no cargan, no hay nada que
+    // armar y ofrecerlo seria mandar a alguien a esperar tres minutos en vano.
+    el.recGenerar.classList.add('hidden');
+  };
+
+  const siguiente = () => poner(reelIndice + 1);
+
+  const fallo = () => {
+    clearTimeout(reloj);
+    fallosSeguidos++;
+    // Una vuelta entera sin que cargue uno solo: no es este clip, es todo.
+    if (fallosSeguidos >= filas.length) { rendirse(); return; }
+    siguiente();
+  };
+
   const poner = (i) => {
+    clearTimeout(reloj);
     reelIndice = ((i % filas.length) + filas.length) % filas.length;
     const f = filas[reelIndice];
     el.recPlaca.innerHTML = `<em>#${f.puesto}</em> ${escapar(f.alias)} · ${Number(f.aura).toLocaleString('es-GT')}`;
@@ -2199,11 +2235,17 @@ function reproducirReel(filas) {
     // `muted` para que el navegador deje arrancar sin gesto. El clip del
     // escaneo solitario no tiene audio igual, asi que no se pierde nada.
     v.muted = true;
-    v.play().catch(() => { /* que lo toque a mano */ });
+    // Un clip que se queda cargando para siempre NO dispara `error`: se queda
+    // con el spinner puesto y sin avisar. Doce segundos es de sobra para 5MB
+    // hasta en una red mala, y si no llego es que no va a llegar.
+    reloj = setTimeout(fallo, 12000);
+    v.play().catch(() => { /* sin gesto: que lo toque a mano, no es una falla */ });
   };
 
-  v.onended = () => poner(reelIndice + 1);
-  v.onerror = () => { if (filas.length > 1) poner(reelIndice + 1); };
+  // Cargo de verdad = este anduvo. Recien ahi se perdona lo anterior.
+  v.oncanplay = () => { clearTimeout(reloj); fallosSeguidos = 0; };
+  v.onended = siguiente;
+  v.onerror = fallo;
   poner(0);
 }
 
