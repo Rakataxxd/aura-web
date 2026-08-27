@@ -43,21 +43,28 @@ new_sqlite_classes = ["Sala", "Lobby"]
 [triggers]
 crons = ["0 * * * *"]
 
-# VIDEOS DE LOS TORNEOS (R2). Va comentado A PROPOSITO.
+# VIDEOS DE LOS TORNEOS. Van en KV y NO en R2, a proposito.
 #
-# Con este bloque puesto y el bucket sin crear, `wrangler deploy` FALLA y se
-# cae el backend entero —ranking, salas y analitica— por una funcion opcional.
-# El codigo ya contempla que no exista: sin `env.CLIPS`, los torneos andan
-# igual y simplemente no guardan video (y al crear uno se avisa).
+# R2 seria el lugar correcto —10 GB gratis, pensado para archivos, con Range
+# nativo—, pero habilitarlo obliga a aceptar sus terminos y dejar una TARJETA en
+# la cuenta, aunque despues nunca cobre nada. KV entra en el plan gratis de
+# Workers sin pedir nada: 1 GB, valores de hasta 25 MB y expiracion por TTL.
 #
-# PARA PRENDERLO, en este orden:
-#   1. habilitar R2 una sola vez en el dashboard (dash.cloudflare.com -> R2)
-#   2. npx wrangler r2 bucket create aura-clips
-#   3. descomentar las tres lineas de abajo
-#   4. npx wrangler deploy
+# La cuenta, con numeros medidos y no estimados: un clip de 15s a 720p60 con
+# movimiento pesado pesa 5.3 MB (ver el bitrate en src/record.js). 1 GB da para
+# ~190 videos, y con el tope de 10 por torneo son ~19 torneos con video a la
+# vez. Si algun dia queda chico, se habilita R2 y se ata como CLIPS_R2: el
+# adaptador de src/almacen.js lo prefiere solo y no hay nada mas que cambiar.
 #
+# El TTL de KV es lo que borra los videos a los 7 dias del cierre. El cron
+# sigue existiendo, pero solo para limpiar la marca en la tabla.
+[[kv_namespaces]]
+binding = "CLIPS"
+id = "040ddbaecec74ecea39b9de229e31760"
+
+# Si algun dia se habilita R2, descomentar esto y listo: gana sobre KV solo.
 # [[r2_buckets]]
-# binding = "CLIPS"
+# binding = "CLIPS_R2"
 # bucket_name = "aura-clips"
 
 # SECRETOS (no van acá: `[vars]` se publica en texto plano en el dashboard).

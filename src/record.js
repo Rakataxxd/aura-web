@@ -1,7 +1,19 @@
 // El clip ES el producto. Sin clip para postear no hay crecimiento.
 // Safari no soporta webm -> hay que negociar el codec, no asumirlo.
 
+// EL ORDEN IMPORTA Y EL PRIMERO NO ES CASUAL. `avc1.640028` es H.264 High;
+// antes acá iba `avc1.42E01E`, que es Baseline: el perfil MENOS eficiente que
+// existe —sin B-frames y sin CABAC— y el que se elige por costumbre porque es
+// el que todo reproduce. High lo reproduce cualquier teléfono de la última
+// década y da bastante más calidad por bit.
+//
+// OJO CON LO QUE ESTO NO HACE: no achica el archivo. MediaRecorder apunta al
+// bitrate que se le pide y lo cumple con el perfil que sea (medido: Baseline
+// 5.13MB vs High 5.11MB al mismo bitrate). Lo que compra es CALIDAD al mismo
+// peso, y por eso permite bajar el bitrate más abajo sin que se note.
 const CANDIDATES = [
+  'video/mp4;codecs=avc1.640028',
+  'video/mp4;codecs=avc1.4D401E',
   'video/mp4;codecs=avc1.42E01E',
   'video/mp4',
   'video/webm;codecs=vp9',
@@ -14,6 +26,7 @@ const CANDIDATES = [
 // algunos navegadores rechazan al construir el MediaRecorder, y el fallback
 // termina grabando webm donde había mp4 (o nada).
 const CANDIDATES_AV = [
+  'video/mp4;codecs=avc1.640028,mp4a.40.2',
   'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
   'video/mp4',
   'video/webm;codecs=vp9,opus',
@@ -94,10 +107,23 @@ export class Recorder {
       try { stream.addTrack(this.mezcla.track); }
       catch { this.mezcla.cerrar(); this.mezcla = null; }
     }
+    // LA RESOLUCION Y LOS FPS NO SE TOCAN. El clip sale a 720p y a 60fps
+    // porque es el producto: es lo que la gente postea. El unico lever que se
+    // usa para que pese menos es el bitrate, y ahora ademas se codifica con
+    // H.264 High (ver CANDIDATES), que da mas calidad por bit y es lo que
+    // permite bajarlo sin que se note.
+    //
     // Medido: Chrome entrega ~2.4x el bitrate pedido con esta cantidad de
-    // movimiento. 3.5M -> ~8Mbps reales -> ~14MB por clip de 15s a 60fps,
-    // que todavia se comparte bien con datos moviles.
-    const opts = { videoBitsPerSecond: 3_500_000 };
+    // movimiento. Antes esto era 3.5M -> ~8Mbps reales -> ~14MB por clip de
+    // 15s, que es muchisimo para 720p60 (YouTube entrega 720p60 a ~3Mbps) y
+    // encima Instagram y TikTok recomprimen todo lo que se sube, asi que esos
+    // megas se tiraban del otro lado.
+    //
+    // POR QUE NO SE RECOMPRIME DESPUES. Se evaluo grabar alto y reencodear
+    // chico antes de guardar: sale PEOR. Un doble encode pierde calidad contra
+    // un solo encode al bitrate final, y encima cuesta 15 segundos de telefono
+    // por clip. Un solo encode, bien elegido, gana siempre.
+    const opts = { videoBitsPerSecond: 1_500_000 };
     const mime = this.mezcla ? pickMime(true) : this.mime;
     if (mime) opts.mimeType = mime;
     try {

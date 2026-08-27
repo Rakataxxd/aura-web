@@ -2096,7 +2096,7 @@ el.tFarmear?.addEventListener('click', () => {
  * Sube la ronda al torneo. Se llama sola al cerrar la partida.
  *
  * EL ORDEN ES DELIBERADO: primero el puntaje (un JSON de nada, instantaneo) y
- * DESPUES el video (14MB, puede tardar medio minuto). Asi el puesto aparece en
+ * DESPUES el video (~5MB, puede tardar). Asi el puesto aparece en
  * pantalla enseguida y el archivo sube por atras. Al reves, el que tiene mala
  * señal se queda mirando "subiendo…" y no ve nunca su puesto, que es lo unico
  * que fue a buscar.
@@ -2184,7 +2184,7 @@ function abrirRecop() {
  * Reproduce los clips del top uno tras otro en el <video> de la pantalla.
  *
  * Se cambia el `src` del MISMO elemento en vez de tener uno por clip: diez
- * <video> con 14MB cada uno es la forma mas rapida de que un telefono se
+ * <video> con varios MB cada uno es la forma mas rapida de que un telefono se
  * quede sin memoria a mitad del reel.
  */
 function reproducirReel(filas) {
@@ -2267,7 +2267,7 @@ el.recBajar?.addEventListener('click', async () => {
 });
 
 el.recVolver?.addEventListener('click', () => {
-  // Los objectURL se sueltan al salir: son 14MB cada uno y quedarse con diez
+  // Los objectURL se sueltan al salir: son varios MB cada uno y quedarse con diez
   // colgados es medio giga de memoria retenida en el telefono del streamer.
   el.recVideo.onended = null;
   el.recVideo.pause();

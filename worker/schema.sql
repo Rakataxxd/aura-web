@@ -81,7 +81,7 @@ CREATE INDEX IF NOT EXISTS ix_ev_quien ON eventos (dia, visitante);
 -- no es capricho: en `runs` hay tres periodos (dia/semana/historico) y una
 -- partida floja de hoy igual puede ganar el ranking del dia, asi que hay que
 -- conservarlas todas. Un torneo es UN periodo —el que definio el organizador—
--- y encima cada fila puede tener un video de 14MB colgando. Guardar todos los
+-- y encima cada fila puede tener un video de 5MB colgando. Guardar todos los
 -- intentos serian mil videos por torneo para mostrar diez.
 CREATE TABLE IF NOT EXISTS torneos (
   codigo      TEXT PRIMARY KEY,           -- 6 caracteres; las salas usan 4, ver abajo
@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS torneos (
 -- `clip` es la llave en R2, o NULL. NULL no significa "no jugo": significa
 -- "no quedo entre los mejores" o "el torneo no guarda videos" o "la subida se
 -- corto". El puesto NUNCA depende del video —el puntaje se anota al instante y
--- el archivo va despues, por atras— porque una subida de 14MB en datos moviles
+-- el archivo va despues, por atras— porque una subida de varios MB en datos moviles
 -- no puede costarte el puesto.
 CREATE TABLE IF NOT EXISTS torneo_runs (
   codigo    TEXT    NOT NULL,

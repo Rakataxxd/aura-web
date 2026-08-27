@@ -3,14 +3,16 @@
 //
 // POR QUE NO ES UN DURABLE OBJECT (la razon larga esta en schema.sql): un
 // torneo es asincrono. Nadie espera a nadie, no hay nada que empujar en vivo.
-// Todo esto son consultas a D1 y un archivo en R2.
+// Todo esto son consultas a D1 y un archivo en el almacen (ver almacen.js).
 //
 // LOS VIDEOS SON OPCIONALES EN TRES NIVELES, y cada uno se cae solo:
 //   1. el organizador elige si su torneo los guarda      -> `clips` en la tabla
-//   2. la cuenta puede no tener R2 habilitado            -> `env.CLIPS` undefined
-//   3. la subida puede fallar (14MB en datos moviles)    -> `clip` queda NULL
+//   2. la cuenta puede no tener almacen atado            -> ver almacen.js
+//   3. la subida puede fallar (varios MB en datos moviles) -> `clip` queda NULL
 // En los tres casos el torneo funciona igual y la tabla se ve completa. El
 // puntaje se anota SIEMPRE por su propia via, antes y aparte del archivo.
+
+import { abrir, hayAlmacen, guardar, borrar as borrarArchivo, servir } from './almacen.js';
 
 // Sin O/0/I/1: el codigo se dicta en un stream y se escribe a mano.
 const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -45,13 +47,16 @@ export const DIAS_GUARDADOS = 7;
 const DIAS_MAX = 90;
 
 // Cuantos videos se conservan por torneo. Es el top: si te pasan, tu video se
-// borra solo (ver `acomodarClips`). Con ~14MB por clip esto es ~140MB por
-// torneo, que en los 10GB del plan gratis de R2 son ~70 torneos a la vez.
+// borra solo (ver `acomodarClips`). Con 5.3MB por clip esto es ~53MB por
+// torneo, que en el 1GB del plan gratis de KV son ~19 torneos a la vez.
 const TOPE_CLIPS = 10;
 
-// Un clip de 15s a 60fps pesa ~14MB medidos. 25 deja lugar para un telefono
-// que grabe mas gordo sin dejar entrar una subida de cualquier tamaño.
-const CLIP_MAX_BYTES = 25 * 1024 * 1024;
+// Con el bitrate actual un clip de 15s pesa 5.3MB (ver src/record.js). El tope
+// de 24MB deja lugar de sobra para un telefono que grabe mas gordo, y queda
+// justo por debajo del limite de 25MB por valor que tiene KV: una subida mas
+// grande que eso hay que rechazarla ACA, con un mensaje que se entienda, y no
+// dejar que reviente adentro del almacen.
+const CLIP_MAX_BYTES = 24 * 1024 * 1024;
 
 const NOMBRE_OK = /^[\p{L}\p{N} ._'!¡?¿&:-]{3,40}$/u;
 const ALIAS_OK = /^[\p{L}\p{N} ._-]{2,14}$/u;
@@ -134,11 +139,11 @@ export async function crear(req, env, { pais, ahora }) {
     return { error: `los dias van de 1 a ${DIAS_MAX}`, status: 400 };
   }
 
-  // Se pide guardar videos pero la cuenta no tiene R2: se crea igual, con los
+  // Se pide guardar videos pero no hay almacen atado: se crea igual, con los
   // clips apagados, y se avisa. Negarse a crear el torneo por esto seria
   // perder al organizador por una casilla.
   const queria = body.clips === true;
-  const clips = queria && !!env.CLIPS;
+  const clips = queria && hayAlmacen(env);
 
   const termina = ahora + dias * DIA_MS;
   const codigo = codigoNuevo();
@@ -163,7 +168,7 @@ export async function crear(req, env, { pais, ahora }) {
       clave: secreto,
       // El unico momento en que esto se puede decir. Despues no hay como saber
       // que el organizador queria clips y no los tuvo.
-      avisoClips: queria && !clips ? 'R2 no esta habilitado en la cuenta: el torneo va sin videos' : '',
+      avisoClips: queria && !clips ? 'no hay almacenamiento configurado: el torneo va sin videos' : '',
     },
   };
 }
@@ -282,7 +287,7 @@ export async function puntaje(req, env, { pais, ahora }) {
   const yo = await puestoDe(env, codigo, k);
 
   // `superado` es lo que decide, del lado del cliente, si vale la pena gastar
-  // 14MB de datos moviles subiendo el video: solo se sube el que mejoro su
+  // datos moviles subiendo el video: solo se sube el que mejoro su
   // propia marca Y entro al top.
   const superado = !!yo && yo.aura === aura;
   return {
@@ -294,7 +299,7 @@ export async function puntaje(req, env, { pais, ahora }) {
       // Que el cliente NO decida esto solo: el tope y el opt-in viven en el
       // servidor y pueden cambiar entre que se cargo la pagina y se termino
       // de jugar.
-      subirClip: !!t.clips && !!env.CLIPS && superado && !!yo && yo.puesto <= t.tope_clips,
+      subirClip: !!t.clips && hayAlmacen(env) && superado && !!yo && yo.puesto <= t.tope_clips,
     },
   };
 }
@@ -311,6 +316,8 @@ export async function puntaje(req, env, { pais, ahora }) {
  * `tope_clips` archivos por torneo pase lo que pase.
  */
 async function acomodarClips(env, t) {
+  const alm = abrir(env);
+  if (!alm) return 0;
   const { results } = await env.DB.prepare(
     `SELECT alias_key FROM torneo_runs
       WHERE codigo = ? AND clip IS NOT NULL
@@ -323,7 +330,7 @@ async function acomodarClips(env, t) {
     // fila diciendo que no hay video y el archivo ocupando lugar para siempre,
     // sin nada que lo referencie. En este orden, lo peor que queda es una fila
     // que promete un video que ya no esta, y eso se ve y se puede arreglar.
-    try { await env.CLIPS.delete(llaveClip(t.codigo, r.alias_key)); }
+    try { await borrarArchivo(alm, llaveClip(t.codigo, r.alias_key)); }
     catch (e) { console.warn('[torneo] no se pudo borrar el clip', e?.message); }
     await env.DB.prepare(
       'UPDATE torneo_runs SET clip = NULL WHERE codigo = ? AND alias_key = ?'
@@ -333,7 +340,8 @@ async function acomodarClips(env, t) {
 }
 
 export async function guardarClip(req, env, url, ahora) {
-  if (!env.CLIPS) return { error: 'este torneo no guarda videos', status: 409 };
+  const alm = abrir(env);
+  if (!alm) return { error: 'este torneo no guarda videos', status: 409 };
 
   const codigo = (url.searchParams.get('codigo') || '').toUpperCase();
   if (!codigoValido(codigo)) return { error: 'codigo invalido', status: 400 };
@@ -345,6 +353,9 @@ export async function guardarClip(req, env, url, ahora) {
   if (!t.clips) return { error: 'este torneo no guarda videos', status: 409 };
   if (estado(t, ahora) !== 'abierto') return { error: 'el torneo no esta abierto', status: 409 };
 
+  // Rechazo temprano por el header, para no leer 100MB a memoria antes de
+  // decir que no. NO es el control de verdad —el cliente escribe ese numero y
+  // puede mentir—: el que vale es el de mas abajo, sobre los bytes reales.
   const largo = Number(req.headers.get('content-length') || 0);
   if (largo > CLIP_MAX_BYTES) return { error: 'el video pesa demasiado', status: 413 };
 
@@ -352,7 +363,7 @@ export async function guardarClip(req, env, url, ahora) {
 
   // Se vuelve a mirar el puesto ACA y no se confia en el `subirClip` que se
   // devolvio antes: entre que el telefono termino de jugar y termino de subir
-  // 14MB pueden pasar treinta segundos, y en ese rato pueden haberlo pasado
+  // el archivo pueden pasar treinta segundos, y en ese rato pueden pasarlo
   // diez personas. Sin esto, el que sube lento mete su archivo igual y
   // desaloja al que si esta en el top.
   const yo = await puestoDe(env, codigo, k);
@@ -364,19 +375,16 @@ export async function guardarClip(req, env, url, ahora) {
   const tipo = req.headers.get('content-type') || 'video/mp4';
   if (!/^video\/(mp4|webm)/.test(tipo)) return { error: 'formato de video invalido', status: 415 };
 
+  // El cuerpo se lee ENTERO antes de guardarlo, y no se confia en
+  // `content-length`: ese header lo escribe el cliente y se puede mentir, asi
+  // que el tope de tamaño solo vale de verdad despues de tener los bytes. En KV
+  // ademas hace falta el largo si o si (ver almacen.js).
+  const datos = await req.arrayBuffer();
+  if (datos.byteLength > CLIP_MAX_BYTES) return { error: 'el video pesa demasiado', status: 413 };
+  if (!datos.byteLength) return { error: 'el video llego vacio', status: 400 };
+
   const llave = llaveClip(codigo, k);
-  await env.CLIPS.put(llave, req.body, {
-    httpMetadata: {
-      contentType: tipo,
-      // Un mes: el objeto se borra a los 7 dias de cerrar el torneo, asi que
-      // nunca vive tanto. Lo que se evita es revalidar el mismo video en cada
-      // reproduccion del recopilatorio, que baja los diez seguidos.
-      cacheControl: 'public, max-age=2592000',
-    },
-    // Para el barrido: R2 no sabe de la tabla y una llave suelta no dice a que
-    // torneo pertenece ni cuando vence.
-    customMetadata: { codigo, purga: String(t.purga) },
-  });
+  await guardar(alm, llave, datos, { tipo, vence: t.purga, codigo });
 
   await env.DB.prepare(
     'UPDATE torneo_runs SET clip = ? WHERE codigo = ? AND alias_key = ?'
@@ -389,43 +397,18 @@ export async function guardarClip(req, env, url, ahora) {
 /**
  * Devuelve el video de alguien. Publico: el que tiene el codigo, lo ve.
  *
- * Con Range, porque sin eso un <video> de 14MB no puede buscar dentro del
+ * Con Range, porque sin eso un <video> de varios MB no puede buscar dentro del
  * archivo y en iOS directamente no arranca: Safari pide los primeros bytes
  * antes de decidir si sabe reproducirlo, y una respuesta 200 entera a esa
  * pregunta la trata como que no.
  */
 export async function verClip(req, env, url) {
-  if (!env.CLIPS) return null;
+  const alm = abrir(env);
+  if (!alm) return null;
   const codigo = (url.searchParams.get('codigo') || '').toUpperCase();
   const alias = (url.searchParams.get('alias') || '').trim();
   if (!codigoValido(codigo) || !ALIAS_OK.test(alias)) return null;
-
-  const obj = await env.CLIPS.get(llaveClip(codigo, clave(alias)), {
-    range: req.headers,
-    onlyIf: req.headers,
-  });
-  if (!obj) return null;
-
-  const h = new Headers();
-  obj.writeHttpMetadata(h);
-  h.set('etag', obj.httpEtag);
-  h.set('accept-ranges', 'bytes');
-  // `body` no viene cuando la peticion fue condicional y no cambio nada (304),
-  // o cuando fue un HEAD. Devolver 200 con cuerpo vacio ahi rompe el <video>.
-  if (!obj.body) return new Response(null, { status: 304, headers: h });
-
-  // Se contesta 206 SOLO si el pedido traia Range de verdad. R2 devuelve un
-  // `obj.range` normalizado (offset 0, largo entero) aunque no se lo hayan
-  // pedido, y fiarse de eso hacia que una descarga comun contestara "206
-  // Partial Content" con el archivo completo: es HTTP valido pero es mentira, y
-  // hay clientes que reintentan al ver un parcial que no pidieron.
-  if (req.headers.has('range') && obj.range && 'offset' in obj.range) {
-    const desde = obj.range.offset ?? 0;
-    const largo = obj.range.length ?? (obj.size - desde);
-    h.set('content-range', `bytes ${desde}-${desde + largo - 1}/${obj.size}`);
-    return new Response(obj.body, { status: 206, headers: h });
-  }
-  return new Response(obj.body, { headers: h });
+  return servir(alm, llaveClip(codigo, clave(alias)), req);
 }
 
 // ---------------------------------------------------------------------------
@@ -445,8 +428,9 @@ export async function borrarEntrada(req, env) {
   if (!mismoSecreto(body.clave, t.clave)) return { error: 'no sos el organizador', status: 403 };
 
   const k = clave(alias);
-  if (env.CLIPS) {
-    try { await env.CLIPS.delete(llaveClip(codigo, k)); }
+  const alm = abrir(env);
+  if (alm) {
+    try { await borrarArchivo(alm, llaveClip(codigo, k)); }
     catch (e) { console.warn('[torneo] borrar clip', e?.message); }
   }
   await env.DB.prepare('DELETE FROM torneo_runs WHERE codigo = ? AND alias_key = ?')
@@ -489,7 +473,8 @@ export async function cerrar(req, env, ahora) {
  * de una invocacion: lo que quede vencido se lleva la corrida siguiente.
  */
 export async function purgar(env, ahora, LIMITE = 5) {
-  if (!env.CLIPS) return { torneos: 0, clips: 0 };
+  const alm = abrir(env);
+  if (!alm) return { torneos: 0, clips: 0 };
 
   const { results } = await env.DB.prepare(
     `SELECT codigo FROM torneos
@@ -504,7 +489,7 @@ export async function purgar(env, ahora, LIMITE = 5) {
       'SELECT alias_key FROM torneo_runs WHERE codigo = ? AND clip IS NOT NULL'
     ).bind(t.codigo).all();
     for (const f of filas || []) {
-      try { await env.CLIPS.delete(llaveClip(t.codigo, f.alias_key)); clips++; }
+      try { await borrarArchivo(alm, llaveClip(t.codigo, f.alias_key)); clips++; }
       catch (e) { console.warn('[purga]', e?.message); }
     }
     await env.DB.prepare('UPDATE torneo_runs SET clip = NULL WHERE codigo = ?')

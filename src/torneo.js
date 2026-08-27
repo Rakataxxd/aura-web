@@ -117,8 +117,8 @@ export const urlClip = (codigo, alias) =>
 /**
  * Sube el clip. Aparte de `pedir` y con XMLHttpRequest a proposito.
  *
- * DOS MOTIVOS, los dos por el tamaño: son ~14MB y en datos moviles eso puede
- * tardar medio minuto.
+ * DOS MOTIVOS, los dos por el tamaño: son ~5MB y en datos moviles eso puede
+ * tardar bastante.
  *   - `fetch` no tiene progreso de SUBIDA (solo de bajada). Sin una barra,
  *     medio minuto sin señal de vida se lee como colgado y la gente cierra.
  *   - El timeout de 8s de `pedir` cortaria toda subida que no sea wifi.
@@ -132,7 +132,7 @@ export function subirClip({ codigo, alias, blob, onProgreso }) {
     const x = new XMLHttpRequest();
     x.open('PUT', `${API}/api/torneo/clip?codigo=${encodeURIComponent(String(codigo).toUpperCase())}&alias=${encodeURIComponent(alias)}`);
     x.setRequestHeader('content-type', blob.type || 'video/mp4');
-    // Dos minutos: un clip de 14MB a 1Mbps de subida son ~110 segundos, y esa
+    // Dos minutos: un clip de 5MB a 400kbps de subida son ~105 segundos, y esa
     // es una conexion mala pero real.
     x.timeout = 120000;
     x.upload.onprogress = (e) => {
