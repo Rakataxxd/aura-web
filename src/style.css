@@ -250,12 +250,28 @@ h2 {
 
 /* La tabla scrollea SOLA. Con el panel entero scrolleando, en un telefono
    bajo se perdian de vista las pestañas y el boton de volver. */
+/*
+ * SIN `overscroll-behavior: contain`. Estuvo, y hacia que no se pudiera
+ * scrollear la pantalla del torneo con la rueda del mouse.
+ *
+ * `contain` significa literalmente "no dejes que el scroll pase al padre". La
+ * tabla es su propio contenedor de scroll (tiene `max-height`), y con pocos
+ * participantes no necesita scrollear nada: la rueda entraba ahi, no tenia
+ * nada que mover, y tenia PROHIBIDO pasarle el sobrante al panel. Zona muerta
+ * justo donde esta la tabla, que es el centro de la pantalla y donde uno apoya
+ * el mouse. Se scrolleaba sobre el titulo y sobre los botones, y en el medio
+ * no pasaba nada.
+ *
+ * Encadenar es lo que uno quiere ACA: si la tabla no puede moverse —o ya llego
+ * al final— el que tiene que moverse es el panel. `contain` sirve para que un
+ * scroll interno no arrastre la pagina de atras, y ese problema no existe en
+ * una app de una sola pantalla fija.
+ */
 .tabla {
   list-style: none;
   width: min(100%, 420px);
   max-height: min(46vh, 340px);
   overflow-y: auto;
-  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   border-top: 1px solid rgba(244, 239, 228, .14);
   border-bottom: 1px solid rgba(244, 239, 228, .14);
@@ -272,7 +288,34 @@ h2 {
 }
 .tabla li:last-child { border-bottom: 0; }
 .tabla .pos { color: var(--acid); text-align: right; }
-.tabla .quien { font-family: "Chakra Petch", system-ui, sans-serif; font-weight: 700; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/*
+ * `pointer-events: none` NO es cosmetico: sin eso la rueda del mouse no
+ * scrollea la pantalla del torneo.
+ *
+ * El `overflow: hidden` de acá es para cortar los nombres largos con puntos
+ * suspensivos, y no se puede sacar. Pero un elemento con `overflow: hidden` es
+ * un contenedor de scroll a los ojos del navegador —aunque no tenga nada que
+ * scrollear—, y Chrome engancha la rueda AHI y no la deja subir al panel. Con
+ * la tabla ocupando el centro de la pantalla, ese es justo el lugar donde uno
+ * apoya el mouse: se scrolleaba sobre el titulo y sobre los botones, y sobre
+ * los nombres no pasaba nada.
+ *
+ * Se puede apagar porque el nombre no es interactivo: no se clickea ni se
+ * arrastra. Lo unico que se pierde es poder seleccionarlo con el mouse.
+ */
+.tabla .quien {
+  font-family: "Chakra Petch", system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: .04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* El play de "este tiene video guardado". Hereda el `pointer-events: none`
+   del nombre, que es lo que queremos: es un indicador, no un boton. */
+.tabla .tiene-clip { font-style: normal; color: var(--acid); font-size: 11px; }
 .tabla .cuanto { font-variant-numeric: tabular-nums; }
 .tabla li.yo { background: rgba(201, 255, 46, .12); }
 .tabla li.podio .pos { color: var(--gold); font-size: 15px; }
