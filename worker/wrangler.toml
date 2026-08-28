@@ -6,6 +6,20 @@ compatibility_date = "2026-08-01"
 # el registro DNS en la zona: no hay que tocar el panel.
 routes = [
   { pattern = "api.auratester.com", custom_domain = true },
+  # EL MISMO WORKER, TAMBIEN BAJO EL DOMINIO DEL SITIO.
+  #
+  # POR QUE, si ya tiene api.auratester.com: porque un video servido desde OTRO
+  # host que la pagina es "media de terceros", y eso es exactamente lo que los
+  # bloqueadores existen para bloquear. Paso de verdad: la tabla del torneo
+  # cargaba (JSON chico, nadie lo mira) y el video no, en un navegador con
+  # Shields agresivos —imposible de reproducir desde afuera porque depende del
+  # perfil de cada uno—. Desde el mismo dominio es contenido propio del sitio y
+  # ningun bloqueador lo toca.
+  #
+  # Pages sigue sirviendo todo lo demas: una ruta de Worker solo se lleva las
+  # URLs que le calzan, y el sitio no usa /api/ para nada mas.
+  { pattern = "auratester.com/api/*", zone_name = "auratester.com" },
+  { pattern = "www.auratester.com/api/*", zone_name = "auratester.com" },
 ]
 
 
