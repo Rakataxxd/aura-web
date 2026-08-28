@@ -58,8 +58,9 @@ const el = {
   tFarmear: $('tFarmear'), tRecop: $('tRecop'), tCompartir: $('tCompartir'),
   tOrg: $('tOrg'), tLinkOrg: $('tLinkOrg'), tCerrar: $('tCerrar'), tOrgMsg: $('tOrgMsg'),
   tVolver: $('tVolver'),
-  recop: $('recop'), recTitulo: $('recTitulo'), recCaja: $('recCaja'), recVideo: $('recVideo'),
-  recPlaca: $('recPlaca'), recMsg: $('recMsg'), recProgCaja: $('recProgCaja'), recProg: $('recProg'),
+  recop: $('recop'), recTitulo: $('recTitulo'), recCaja: $('recCaja'), recPista: $('recPista'),
+  recPuntos: $('recPuntos'), recFinal: $('recFinal'),
+  recMsg: $('recMsg'), recProgCaja: $('recProgCaja'), recProg: $('recProg'),
   recGenerar: $('recGenerar'), recBajar: $('recBajar'), recVolver: $('recVolver'),
   rTorneo: $('rTorneo'), compartir: $('compartir'), shIg: $('shIg'), shTt: $('shTt'),
 };
@@ -2052,7 +2053,7 @@ function pintarTorneo(d) {
   // reproduce nada es peor que no ofrecerlo.
   const mio = String(getAlias()).trim().toLowerCase();
   el.tTabla.innerHTML = d.filas.length
-    ? d.filas.map((f) => `<li class="${f.puesto <= 3 ? 'podio ' : ''}${String(f.alias).toLowerCase() === mio ? 'yo' : ''}">
+    ? d.filas.map((f) => `<li class="${f.puesto <= 3 ? 'podio ' : ''}${f.clip ? 'con-clip ' : ''}${String(f.alias).toLowerCase() === mio ? 'yo' : ''}"${f.clip ? ` data-alias="${escapar(f.alias)}" title="Ver el video de ${escapar(f.alias)}"` : ''}>
         <span class="pos">${f.puesto}</span>
         <span class="quien">${escapar(f.alias)}${f.clip ? ' <em class="tiene-clip">▶</em>' : ''}</span>
         <span class="cuanto">${Number(f.aura).toLocaleString('es-GT')}</span>
@@ -2090,6 +2091,22 @@ function copiarEn(boton, texto, dice = 'COPIADO') {
     })
     .catch(() => { el.tCodMsg.textContent = texto; });
 }
+
+/**
+ * Tocar a alguien de la tabla abre SU video.
+ *
+ * El manejador vive en la tabla y no en cada fila: las filas se vuelven a
+ * dibujar enteras en cada refresco, y con un listener por fila habria que
+ * volver a atarlos cada vez (y los viejos quedarian colgados).
+ */
+el.tTabla?.addEventListener('click', (ev) => {
+  const li = ev.target.closest('li.con-clip');
+  if (!li || !torneoDatos) return;
+  const alias = li.dataset.alias;
+  const conClip = torneoDatos.filas.filter((f) => f.clip).slice(0, torneoDatos.topeClips);
+  const i = conClip.findIndex((f) => f.alias === alias);
+  abrirRecop(Math.max(0, i));
+});
 
 el.tCodigo?.addEventListener('click', () => {
   if (torneoDatos) copiarEn(el.tCodigo, linkTorneo(torneoDatos.codigo), 'LINK COPIADO');
@@ -2204,18 +2221,19 @@ async function anotarEnTorneo() {
 
 let clipsReel = [];
 let recopBlob = null;
-let reelIndice = 0;
 
 el.tRecop?.addEventListener('click', () => abrirRecop());
 
 /** Cuanto tarda en armarse, en minutos y siempre al menos 1. */
 const minutos = (clips) => Math.max(1, Math.ceil(duracionEstimada(clips) / 60));
 
-function abrirRecop() {
+function abrirRecop(arranque = 0) {
   if (!torneoDatos) return;
   recopBlob = null;
   // Se limpia lo que pudo haber dejado un intento anterior que se rindio.
   el.recCaja.classList.remove('hidden');
+  el.recPuntos.classList.remove('hidden');
+  el.recFinal.classList.add('hidden');
   el.recMsg.classList.remove('alerta');
   el.recTitulo.textContent = torneoDatos.nombre;
   el.recBajar.classList.add('hidden');
@@ -2231,79 +2249,163 @@ function abrirRecop() {
     return;
   }
   el.recGenerar.textContent = `GENERAR EL VIDEO (${conClip.length} clips, ~${minutos(conClip)} min)`;
-  el.recMsg.textContent = `Los ${conClip.length} que más farmearon. Se reproducen uno tras otro.`;
+  el.recMsg.textContent = conClip.length > 1
+    ? `Los ${conClip.length} que más farmearon. Deslizá para ver los demás.`
+    : 'El único con video guardado por ahora.';
 
-  // El reel arranca solo: es lo que el streamer quiere ver primero. El archivo
-  // es el paso siguiente y tarda minutos, asi que no puede ser el unico camino.
-  reelIndice = 0;
-  reproducirReel(conClip);
+  montarCarrusel(conClip, arranque);
   show('recop');
 }
 
 /**
- * Reproduce los clips del top uno tras otro en el <video> de la pantalla.
+ * El carrusel de videos del torneo.
  *
- * Se cambia el `src` del MISMO elemento en vez de tener uno por clip: diez
- * <video> con varios MB cada uno es la forma mas rapida de que un telefono se
- * quede sin memoria a mitad del reel.
+ * POR QUE DE COSTADO Y NO UNO SOLO. Antes era un reproductor que pasaba de un
+ * clip al siguiente por su cuenta: se veía UN video y no había forma de saber
+ * que había más, ni de elegir cuál mirar. Con los vecinos asomando a los lados
+ * la pantalla se explica sola y se puede ir al que uno quiere.
+ *
+ * EL DESLIZAMIENTO NO ES NUESTRO. Todo lo hace `scroll-snap` del navegador: el
+ * dedo, el trackpad, shift+rueda y las flechas del teclado ya funcionan sin un
+ * solo manejador de gestos. Lo único que hace este código es mirar cuál quedó
+ * al centro para reproducir ese y pausar los demás.
+ *
+ * SOLO SE CARGAN LOS VECINOS. Diez `<video>` con su `src` puesto son diez
+ * descargas simultáneas y diez decodificadores abiertos: en un teléfono eso es
+ * quedarse sin memoria a mitad del reel. Cada tarjeta recibe su `src` cuando
+ * está a un paso de distancia, y lo suelta cuando se aleja.
  */
-function reproducirReel(filas) {
-  const v = el.recVideo;
-  if (!filas.length) return;
 
-  // CUANTOS FALLARON SEGUIDOS. Sin esto, `onerror` saltaba al siguiente sin
-  // llevar la cuenta: si NINGUN clip cargaba —el servidor caido, el navegador
-  // bloqueando la petición, la red del teléfono— el reel giraba para siempre
-  // mostrando un spinner y cambiando de nombre, sin decir nunca que algo
-  // estaba mal. Una falla infinita y muda es peor que una falla.
-  let fallosSeguidos = 0;
-  let reloj = 0;
+let tarjetas = [];       // {caja, video, fila, cargada}
+let centroActual = -1;
+let observador = null;
 
-  const rendirse = () => {
-    clearTimeout(reloj);
-    v.onended = null; v.onerror = null; v.oncanplay = null;
-    v.removeAttribute('src');
-    v.load();
-    el.recCaja.classList.add('hidden');
-    el.recMsg.textContent = 'No se pudieron cargar los videos de este torneo. '
-      + 'Puede ser tu conexión, o una extensión del navegador bloqueando el video.';
-    el.recMsg.classList.add('alerta');
-    // El recopilatorio baja los mismos archivos: si no cargan, no hay nada que
-    // armar y ofrecerlo seria mandar a alguien a esperar tres minutos en vano.
-    el.recGenerar.classList.add('hidden');
-  };
+const VECINDAD = 1;      // cuántas tarjetas alrededor se precargan
 
-  const siguiente = () => poner(reelIndice + 1);
+function soltarCarrusel() {
+  observador?.disconnect();
+  observador = null;
+  for (const t of tarjetas) {
+    t.video.pause();
+    t.video.removeAttribute('src');
+    t.video.load();
+  }
+  tarjetas = [];
+  centroActual = -1;
+  if (el.recPista) el.recPista.innerHTML = '';
+  if (el.recPuntos) el.recPuntos.innerHTML = '';
+}
 
-  const fallo = () => {
-    clearTimeout(reloj);
-    fallosSeguidos++;
-    // Una vuelta entera sin que cargue uno solo: no es este clip, es todo.
-    if (fallosSeguidos >= filas.length) { rendirse(); return; }
-    siguiente();
-  };
+/** Le pone (o le saca) el `src` a una tarjeta según qué tan lejos del centro esté. */
+function acomodarCarga(centro) {
+  tarjetas.forEach((t, i) => {
+    const cerca = Math.abs(i - centro) <= VECINDAD;
+    if (cerca && !t.cargada) {
+      t.video.src = urlClip(torneoDatos.codigo, t.fila.alias);
+      t.cargada = true;
+    } else if (!cerca && t.cargada) {
+      t.video.pause();
+      t.video.removeAttribute('src');
+      t.video.load();
+      t.cargada = false;
+    }
+  });
+}
 
-  const poner = (i) => {
-    clearTimeout(reloj);
-    reelIndice = ((i % filas.length) + filas.length) % filas.length;
-    const f = filas[reelIndice];
-    el.recPlaca.innerHTML = `<em>#${f.puesto}</em> ${escapar(f.alias)} · ${Number(f.aura).toLocaleString('es-GT')}`;
-    v.src = urlClip(torneoDatos.codigo, f.alias);
-    // `muted` para que el navegador deje arrancar sin gesto. El clip del
-    // escaneo solitario no tiene audio igual, asi que no se pierde nada.
+function marcarCentro(i) {
+  if (i === centroActual) return;
+  centroActual = i;
+  tarjetas.forEach((t, n) => {
+    t.caja.classList.toggle('centro', n === i);
+    if (n !== i) t.video.pause();
+  });
+  [...el.recPuntos.children].forEach((p, n) => p.classList.toggle('on', n === i));
+  acomodarCarga(i);
+
+  const t = tarjetas[i];
+  if (!t) return;
+  // `muted` para que el navegador deje arrancar sin un toque explícito. Los
+  // clips del escaneo solitario no tienen audio, así que no se pierde nada.
+  t.video.muted = true;
+  t.video.currentTime = 0;
+  t.video.play().catch(() => { /* que lo toque a mano, no es una falla */ });
+}
+
+/** Centra una tarjeta. `suave` en false para el salto inicial, sin animación. */
+function irATarjeta(i, suave = true) {
+  const t = tarjetas[i];
+  if (!t) return;
+  const pista = el.recCaja;
+  const destino = t.caja.offsetLeft - (pista.clientWidth - t.caja.offsetWidth) / 2;
+  pista.scrollTo({ left: destino, behavior: suave ? 'smooth' : 'auto' });
+  marcarCentro(i);
+}
+
+/**
+ * Arma el carrusel con los que tienen video.
+ * @param {number} arranque índice donde abrir (el que se tocó en la tabla)
+ */
+function montarCarrusel(filas, arranque = 0) {
+  soltarCarrusel();
+
+  filas.forEach((f, i) => {
+    const caja = document.createElement('div');
+    caja.className = 'tarjeta';
+
+    const v = document.createElement('video');
+    v.playsInline = true;
     v.muted = true;
-    // Un clip que se queda cargando para siempre NO dispara `error`: se queda
-    // con el spinner puesto y sin avisar. Doce segundos es de sobra para 5MB
-    // hasta en una red mala, y si no llego es que no va a llegar.
-    reloj = setTimeout(fallo, 12000);
-    v.play().catch(() => { /* sin gesto: que lo toque a mano, no es una falla */ });
-  };
+    v.preload = 'metadata';
+    // Loop y no auto-avance: el que llegó a un video puntual —porque tocó un
+    // nombre en la tabla— vino a ver ESE. Que se le vaya solo al siguiente es
+    // justo lo contrario de lo que pidió.
+    v.loop = true;
 
-  // Cargo de verdad = este anduvo. Recien ahi se perdona lo anterior.
-  v.oncanplay = () => { clearTimeout(reloj); fallosSeguidos = 0; };
-  v.onended = siguiente;
-  v.onerror = fallo;
-  poner(0);
+    const placa = document.createElement('div');
+    placa.className = 'tarjeta-placa';
+    placa.innerHTML = `<em>#${f.puesto}</em> ${escapar(f.alias)}<b>${Number(f.aura).toLocaleString('es-GT')} de aura</b>`;
+
+    const estado = document.createElement('div');
+    estado.className = 'tarjeta-estado';
+    estado.textContent = 'cargando…';
+    v.addEventListener('canplay', () => { estado.textContent = ''; });
+    v.addEventListener('error', () => { estado.textContent = 'no se pudo cargar este video'; });
+
+    caja.append(v, placa, estado);
+    // Tocar una tarjeta que no es la del centro la trae al centro; tocar la
+    // del centro pausa o sigue, que es lo que espera cualquiera.
+    caja.addEventListener('click', () => {
+      if (i !== centroActual) { irATarjeta(i); return; }
+      if (v.paused) v.play().catch(() => {}); else v.pause();
+    });
+
+    el.recPista.appendChild(caja);
+    tarjetas.push({ caja, video: v, fila: f, cargada: false });
+
+    const punto = document.createElement('i');
+    el.recPuntos.appendChild(punto);
+  });
+
+  // Quién está al centro lo decide el navegador, no una cuenta de píxeles
+  // nuestra: `IntersectionObserver` contra la mitad de la pista acierta con
+  // cualquier ancho de pantalla y no cuesta nada mientras se desliza.
+  observador = new IntersectionObserver((entradas) => {
+    for (const e of entradas) {
+      if (!e.isIntersecting) continue;
+      const i = tarjetas.findIndex((t) => t.caja === e.target);
+      if (i >= 0) marcarCentro(i);
+    }
+  }, {
+    root: el.recCaja,
+    // Una franja finita en el centro exacto: así solo una tarjeta la cruza.
+    rootMargin: '0px -49% 0px -49%',
+    threshold: 0,
+  });
+  for (const t of tarjetas) observador.observe(t.caja);
+
+  // El salto inicial va sin animación y en el próximo cuadro, cuando la pista
+  // ya tiene ancho: hacerlo antes deja el scroll en cero.
+  requestAnimationFrame(() => irATarjeta(Math.max(0, Math.min(arranque, tarjetas.length - 1)), false));
 }
 
 el.recGenerar?.addEventListener('click', async () => {
@@ -2311,11 +2413,10 @@ el.recGenerar?.addEventListener('click', async () => {
   const filas = torneoDatos.filas.filter((f) => f.clip).slice(0, torneoDatos.topeClips);
   if (!filas.length) return;
 
-  // El reel de la pantalla se para: dos videos decodificando a la vez mientras
-  // se graba un canvas es justo lo que hace que el recopilatorio salga a
-  // saltos en un telefono.
-  el.recVideo.onended = null;
-  el.recVideo.pause();
+  // El carrusel se apaga: varios videos decodificando a la vez mientras se
+  // graba un canvas es justo lo que hace que el recopilatorio salga a saltos
+  // en un telefono.
+  soltarCarrusel();
 
   el.recGenerar.disabled = true;
   el.recProgCaja.classList.remove('hidden');
@@ -2335,12 +2436,15 @@ el.recGenerar?.addEventListener('click', async () => {
       el.recGenerar.textContent = `ARMANDO… ${Math.round(p * 100)}% ${que || ''}`;
     });
 
-    // Se muestra el resultado en el mismo reproductor: ver el archivo antes de
-    // subirlo es lo minimo, y ademas prueba que salio bien.
-    el.recVideo.onended = null;
-    el.recVideo.src = URL.createObjectURL(recopBlob);
-    el.recVideo.muted = false;
-    el.recPlaca.innerHTML = '<em>EL RECOPILATORIO</em>';
+    // El archivo final se muestra en su propio reproductor y el carrusel se
+    // guarda: son cosas distintas —los clips sueltos contra el video armado— y
+    // dejarlos a la vez en pantalla no ayuda a nadie.
+    soltarCarrusel();
+    el.recCaja.classList.add('hidden');
+    el.recPuntos.classList.add('hidden');
+    el.recFinal.classList.remove('hidden');
+    el.recFinal.src = URL.createObjectURL(recopBlob);
+    el.recFinal.muted = false;
     el.recMsg.textContent = 'Listo. Miralo y guardalo.';
     el.recGenerar.classList.add('hidden');
     el.recBajar.classList.remove('hidden');
@@ -2374,11 +2478,10 @@ el.recBajar?.addEventListener('click', async () => {
  * memoria del telefono.
  */
 function limpiarRecop() {
-  el.recVideo.onended = null;
-  el.recVideo.onerror = null;
-  el.recVideo.pause();
-  el.recVideo.removeAttribute('src');
-  el.recVideo.load();
+  soltarCarrusel();
+  el.recFinal.pause();
+  el.recFinal.removeAttribute('src');
+  el.recFinal.load();
   soltarClips(clipsReel);
   clipsReel = [];
   recopBlob = null;

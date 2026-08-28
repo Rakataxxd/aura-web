@@ -626,26 +626,117 @@ h2 {
 .btn.red.ig:hover { border-color: #e1306c; color: #ff5c8d; }
 .btn.red.tt:hover { border-color: #25f4ee; color: #25f4ee; }
 
-/* ---------- recopilatorio ---------- */
-.reel {
+/* ---------- recopilatorio: el carrusel ---------- */
+/*
+ * Los videos van de costado y los vecinos ASOMAN a los lados. Antes era un
+ * solo reproductor que pasaba de uno al siguiente solo: se veía un video y no
+ * había forma de saber que había más, ni de elegir cuál mirar.
+ *
+ * Todo el deslizamiento es `scroll-snap` nativo: el dedo, el trackpad y las
+ * flechas del teclado ya funcionan sin escribir un manejador de gestos. Lo
+ * único que hace el JS es decidir cuál está al centro para reproducir ese y
+ * pausar los demás.
+ */
+.carrusel {
+  width: 100%;
+  max-width: 560px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  /* Sin barra: acá el que indica que hay más son los vecinos asomando. */
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.carrusel::-webkit-scrollbar { display: none; }
+
+.carrusel-pista {
+  display: flex;
+  gap: 12px;
+  /* El relleno lateral es lo que permite que la PRIMERA y la ÚLTIMA tarjeta
+     lleguen al centro. Sin esto, el primer video queda pegado a la izquierda
+     y nunca se centra. */
+  padding: 4px calc(50% - min(136px, 30vw));
+}
+
+.tarjeta {
+  flex: none;
+  width: min(272px, 60vw);
+  scroll-snap-align: center;
   position: relative;
-  width: min(280px, 70vw);
   aspect-ratio: 9 / 16;
   background: #000;
   border: 2px solid rgba(244, 239, 228, .2);
+  /* Los que no están al centro se achican y se apagan: es lo que hace que se
+     lean como "los de al lado" y no como tres videos peleando por atención. */
+  transform: scale(.85);
+  opacity: .55;
+  transition: transform .22s, opacity .22s, border-color .22s;
+  cursor: pointer;
 }
-.reel video { width: 100%; height: 100%; object-fit: contain; display: block; }
-.reel-placa {
+.tarjeta.centro {
+  transform: scale(1);
+  opacity: 1;
+  border-color: rgba(201, 255, 46, .55);
+}
+.tarjeta video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #000;
+}
+
+/* El cartel de quién es. Siempre visible: el puesto es el dato. */
+.tarjeta-placa {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  padding: 8px 10px;
+  padding: 20px 10px 8px;
   font-family: "Archivo Black", sans-serif;
   font-size: 12px;
   text-align: left;
-  background: linear-gradient(transparent, rgba(10, 10, 12, .9));
+  line-height: 1.3;
+  background: linear-gradient(transparent, rgba(10, 10, 12, .92));
   pointer-events: none;
 }
-.reel-placa em { font-style: normal; color: var(--acid); }
+.tarjeta-placa em { font-style: normal; color: var(--acid); }
+.tarjeta-placa b { display: block; font-weight: 400; opacity: .7; font-size: 11px; }
+
+/* Mientras carga, y cuando no se pudo. */
+.tarjeta-estado {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: "Share Tech Mono", monospace;
+  font-size: 11px;
+  text-align: center;
+  padding: 12px;
+  opacity: .6;
+  pointer-events: none;
+}
+
+/* Los puntitos de abajo: cuántos hay y en cuál estás. */
+.carrusel-puntos { display: flex; gap: 6px; justify-content: center; }
+.carrusel-puntos i {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: rgba(244, 239, 228, .28);
+  transition: background .2s, transform .2s;
+}
+.carrusel-puntos i.on { background: var(--acid); transform: scale(1.35); }
+
+/* El recopilatorio ya armado, que es un archivo y no un carrusel. */
+.reel-final {
+  width: min(280px, 70vw);
+  aspect-ratio: 9 / 16;
+  object-fit: contain;
+  background: #000;
+  border: 2px solid rgba(201, 255, 46, .5);
+  display: block;
+}
+
+/* Las filas de la tabla que tienen video se pueden tocar para verlo. */
+.tabla li.con-clip { cursor: pointer; }
+.tabla li.con-clip:hover { background: rgba(201, 255, 46, .09); }
 
 /* La barra de progreso del recopilatorio. Se arma en tiempo real —tres
    minutos para diez clips— así que sin una barra parece colgado. */

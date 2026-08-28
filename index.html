@@ -277,11 +277,22 @@
       <div class="tape">LOS QUE MÁS FARMEARON</div>
       <h2 id="recTitulo">—</h2>
 
-      <!-- El reel: se mira acá mismo, uno tras otro. -->
-      <div class="reel" id="recCaja">
-        <video id="recVideo" playsinline controls></video>
-        <div class="reel-placa" id="recPlaca"></div>
+      <!-- El reel, en carrusel: se desliza de costado y los vecinos asoman a
+           los lados, para que se vea que hay más de un video sin tener que
+           explicarlo. Las tarjetas las arma el JS a partir de la tabla.
+           `scroll-snap` hace el trabajo pesado: el deslizamiento nativo del
+           dedo y del trackpad ya se siente bien sin escribir un solo
+           manejador de gestos. -->
+      <div class="carrusel" id="recCaja">
+        <div class="carrusel-pista" id="recPista"></div>
       </div>
+      <div class="carrusel-puntos" id="recPuntos"></div>
+
+      <!-- El recopilatorio ya armado. Vive aparte del carrusel: son cosas
+           distintas —uno son los clips sueltos, el otro el archivo final— y
+           reusar el mismo <video> obligaba a desarmar el carrusel para verlo. -->
+      <video class="reel-final hidden" id="recFinal" playsinline controls></video>
+
       <p class="fine" id="recMsg"></p>
 
       <div class="barra-prog hidden" id="recProgCaja"><div id="recProg"></div></div>
