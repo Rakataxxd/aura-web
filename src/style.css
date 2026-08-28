@@ -663,3 +663,61 @@ h2 {
    apretados contra los bordes. No es un desbordamiento —está centrado— pero
    respira mejor un escalón más chico. */
 #nombre h1 { font-size: clamp(38px, 11vw, 72px); }
+
+/* ---------- que se vea que hay mas abajo ---------- */
+/*
+ * Los paneles SIEMPRE pudieron scrollear (`overflow-y: auto`), pero no habia
+ * una sola señal de que hubiera algo mas: sin barra de scroll visible, el
+ * contenido se corta contra el borde y se lee como que ahi termina. En la
+ * pantalla del torneo eso escondia el boton de VOLVER y, para el organizador,
+ * CERRAR EL TORNEO entero.
+ */
+
+/* La barra, visible y en el estilo del sitio. Firefox por `scrollbar-*`,
+   el resto por `::-webkit-scrollbar`. */
+.panel {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(244, 239, 228, .32) transparent;
+}
+.panel::-webkit-scrollbar { width: 10px; }
+.panel::-webkit-scrollbar-track { background: transparent; }
+.panel::-webkit-scrollbar-thumb {
+  background: rgba(244, 239, 228, .3);
+  /* El borde transparente con `content-box` deja aire a los costados sin
+     tener que dibujar un track. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.panel::-webkit-scrollbar-thumb:hover { background: var(--acid); background-clip: content-box; }
+
+/*
+ * El desvanecido del pie. Es lo que sirve EN EL TELEFONO, donde la barra de
+ * scroll no existe hasta que ya estás scrolleando —o sea, hasta después de
+ * que hacía falta saberlo—.
+ *
+ * `sticky` y no `fixed`: como último hijo del contenedor que scrollea, se
+ * pega al borde de abajo sin salirse del panel ni taparle nada a los demás.
+ * La clase la pone el JS solo cuando hay algo mas abajo (ver `avisarScroll`).
+ */
+.panel::after {
+  content: '';
+  position: sticky;
+  bottom: calc(var(--pad) * -1);
+  align-self: stretch;
+  height: 56px;
+  margin-bottom: calc(var(--pad) * -1);
+  flex: none;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s;
+  background: linear-gradient(transparent, rgba(10, 10, 12, .92));
+}
+.panel.hay-mas::after { opacity: 1; }
+
+/* La flechita, encima del desvanecido. Va en el mismo pseudo-elemento no:
+   son dos capas, asi que la punta se dibuja con un fondo aparte. */
+.panel.hay-mas::after {
+  background:
+    radial-gradient(closest-side, rgba(201, 255, 46, .22), transparent 70%) center bottom 10px / 40px 14px no-repeat,
+    linear-gradient(transparent, rgba(10, 10, 12, .92));
+}

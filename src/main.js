@@ -66,6 +66,54 @@ const el = {
 
 const PANELES = ['nombre', 'intro', 'loading', 'count', 'result', 'oops', 'rank', 'buscando',
   'nuevo', 'torneo', 'recop'];
+
+/**
+ * Prende el desvanecido del pie cuando el panel tiene algo mas abajo.
+ *
+ * Los paneles siempre pudieron scrollear, pero no habia UNA sola señal de que
+ * hubiera mas contenido: sin barra visible, lo que queda cortado contra el
+ * borde se lee como el final de la pantalla. En el torneo eso escondia VOLVER,
+ * y al organizador CERRAR EL TORNEO.
+ *
+ * Se apaga al llegar al fondo —seguir insinuando que hay mas cuando ya no hay
+ * es peor que no avisar— con un margen de 4px, porque el scroll de un teclado
+ * o de un trackpad no cae nunca en el numero exacto.
+ */
+function avisarScroll() {
+  for (const k of PANELES) {
+    const p = el[k];
+    if (!p || p.classList.contains('hidden')) { p?.classList.remove('hay-mas'); continue; }
+    const falta = p.scrollHeight - p.clientHeight - p.scrollTop;
+    p.classList.toggle('hay-mas', falta > 4);
+  }
+}
+
+// Al scrollear y al cambiar de tamaño, que es cuando puede dejar de ser cierto.
+// `passive` porque no se cancela nada y asi el scroll no espera al listener.
+for (const k of PANELES) {
+  document.getElementById(k)?.addEventListener('scroll', avisarScroll, { passive: true });
+}
+addEventListener('resize', avisarScroll);
+
+// Y cuando cambia el CONTENIDO, que es el caso que mas importa: la tabla del
+// torneo llega por fetch DESPUES de mostrar el panel, y hasta que no se pinta
+// no hay nada que desborde.
+//
+// Un observador sobre todo el escenario en vez de una llamada en cada lugar
+// que pinta algo: esas se olvidan al agregar la pantalla siguiente. Un
+// ResizeObserver no sirve acá —los paneles miden siempre lo mismo, `inset: 0`,
+// lo que cambia es lo de adentro—, por eso va un MutationObserver.
+if (typeof MutationObserver !== 'undefined') {
+  let pedido = 0;
+  new MutationObserver(() => {
+    // Agrupado en un solo cuadro: pintar una tabla son cincuenta mutaciones
+    // seguidas y no hace falta medir en cada una.
+    cancelAnimationFrame(pedido);
+    pedido = requestAnimationFrame(avisarScroll);
+  }).observe(document.getElementById('stage'), {
+    childList: true, subtree: true, characterData: true,
+  });
+}
 let panelesArriba = [];
 const show = (...ids) => {
   panelesArriba = ids;
@@ -80,6 +128,9 @@ const show = (...ids) => {
   // alto.
   actualizarBarra();
   acomodarTiles();
+  // Despues de pintar: el alto del panel recien existe cuando el navegador
+  // ya hizo el layout, y con `hidden` puesto scrollHeight da 0.
+  requestAnimationFrame(avisarScroll);
 };
 
 // ---------- canvas ----------
