@@ -131,6 +131,8 @@ const show = (...ids) => {
   // Despues de pintar: el alto del panel recien existe cuando el navegador
   // ya hizo el layout, y con `hidden` puesto scrollHeight da 0.
   requestAnimationFrame(avisarScroll);
+  // Y que la flecha de atras del navegador sepa que estamos en otra pantalla.
+  if (ids.length === 1) anotarEnHistorial(ids[0]);
 };
 
 // ---------- canvas ----------
@@ -2016,6 +2018,10 @@ async function abrirTorneo(codigo, { aviso = '', callado = false } = {}) {
     torneoDatos = d;
     setUltimo(c);
     pintarTorneo(d);
+    // Recien ahora se sabe el codigo: cuando se mostro el panel, `torneoDatos`
+    // todavia estaba vacio y la URL quedo sin el. Como el panel no cambio, esto
+    // corrige la direccion sin sumar una entrada al historial.
+    anotarEnHistorial('torneo');
   } catch (e) {
     el.tNombre.textContent = 'NO SE PUDO ABRIR';
     el.tSub.textContent = e.message;
@@ -2359,18 +2365,26 @@ el.recBajar?.addEventListener('click', async () => {
   el.recMsg.textContent = mensajeDe(r, '') || 'Guardado.';
 });
 
-el.recVolver?.addEventListener('click', () => {
-  // Los objectURL se sueltan al salir: son varios MB cada uno y quedarse con diez
-  // colgados es medio giga de memoria retenida en el telefono del streamer.
+/**
+ * Suelta lo que retiene el recopilatorio.
+ *
+ * Es una funcion y no el cuerpo del boton porque del recopilatorio se sale por
+ * DOS caminos: VOLVER y la flecha de atras del navegador. Si la limpieza vive
+ * solo en el boton, salir con la flecha deja medio giga de video colgado en la
+ * memoria del telefono.
+ */
+function limpiarRecop() {
   el.recVideo.onended = null;
+  el.recVideo.onerror = null;
   el.recVideo.pause();
   el.recVideo.removeAttribute('src');
   el.recVideo.load();
   soltarClips(clipsReel);
   clipsReel = [];
   recopBlob = null;
-  show('torneo');
-});
+}
+
+el.recVolver?.addEventListener('click', () => { limpiarRecop(); show('torneo'); });
 
 // ---------- entradas al torneo desde afuera ----------
 
@@ -2443,6 +2457,122 @@ el.nomOk?.addEventListener('click', guardarNombre);
 // El teclado del teléfono muestra "listo" y hay que poder usarlo.
 el.nomInput?.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') guardarNombre(); });
 el.soy?.addEventListener('click', () => pedirNombre());
+
+// ============================================================================
+// LA FLECHA DE ATRAS DEL NAVEGADOR
+//
+// La app es una sola pagina con paneles que se muestran y se esconden, asi que
+// para el navegador nunca pasaba nada: tocar atras te sacaba del sitio entero,
+// aunque estuvieras cuatro pantallas adentro. En el telefono, donde la flecha
+// de atras es EL gesto de navegacion, eso significa perder el torneo por un
+// deslizamiento.
+//
+// Ahora cada pantalla que es "un lugar" deja una entrada en el historial, y
+// atras te lleva a la anterior. Recien cuando no queda ninguna, salis del
+// sitio, que es lo que corresponde.
+// ============================================================================
+
+// Solo las pantallas donde uno SE QUEDA. `loading`, `count` y `buscando` son
+// de paso: dejar una entrada de historial en el medio de una cuenta regresiva
+// haria que atras te devuelva a una pantalla que ya no significa nada.
+const NAVEGABLES = ['nombre', 'intro', 'torneo', 'nuevo', 'rank', 'recop', 'result'];
+
+// Mientras se procesa un `popstate` no hay que empujar nada: si no, volver
+// atras agregaria una entrada nueva y el historial no se vaciaria nunca.
+let volviendo = false;
+let historialListo = false;
+
+// ¿Este hosting sabe servir /t/CODIGO? En Cloudflare Pages si —el sitio vive en
+// la raiz y hay una regla en public/_redirects—, pero el espejo de GitHub Pages
+// cuelga de /aura-web/ y ahi esa ruta es un 404. En el espejo el codigo va en
+// la query, que funciona en los dos lados.
+const RUTA_BONITA = import.meta.env.BASE_URL === '/';
+
+/**
+ * La URL que le corresponde a cada pantalla.
+ *
+ * Solo el torneo tiene direccion propia, porque es la unica que se comparte.
+ * Las demas vuelven a la raiz, y eso arregla de paso algo que molestaba: al
+ * salir de un torneo la barra seguia diciendo /t/CODIGO mientras se veia el
+ * menu, y recargar te devolvia al torneo del que te habias ido.
+ *
+ * SE CONSERVA EL RESTO DE LA QUERY. `?api=` y `?debug` son las dos perillas
+ * para probar contra un backend local o ver los FPS reales, y la primera
+ * version de esto las borraba en cuanto se pintaba la primera pantalla: se
+ * probaba contra produccion sin darse cuenta.
+ */
+function urlDe(panel) {
+  const base = import.meta.env.BASE_URL;
+  const q = new URLSearchParams(location.search);
+  // El codigo lo pone esta funcion, asi que se saca el que hubiera: si no,
+  // entrar a un torneo por link y despues a otro dejaba los dos en la URL.
+  q.delete('t');
+  const enTorneo = panel === 'torneo' && torneoDatos?.codigo;
+  if (enTorneo && !RUTA_BONITA) q.set('t', torneoDatos.codigo);
+  const cola = q.toString() ? `?${q}` : '';
+  return enTorneo && RUTA_BONITA ? `${base}t/${torneoDatos.codigo}${cola}` : `${base}${cola}`;
+}
+
+/** Deja constancia de la pantalla actual. Lo llama `show()`. */
+function anotarEnHistorial(panel) {
+  if (volviendo || !NAVEGABLES.includes(panel)) return;
+  const url = urlDe(panel);
+  if (!historialListo) {
+    // La primera pantalla PISA la entrada que ya existe en vez de agregar una:
+    // si no, la primera vez que tocas atras no pasa nada visible y parece roto.
+    history.replaceState({ panel }, '', url);
+    historialListo = true;
+    return;
+  }
+  if (history.state?.panel === panel) {
+    // Misma pantalla, contenido distinto (otro torneo, otra pestaña del
+    // ranking): se actualiza la URL sin sumar una entrada, o tocar atras diez
+    // veces seria salir de diez ranking iguales.
+    history.replaceState({ panel }, '', url);
+    return;
+  }
+  history.pushState({ panel }, '', url);
+}
+
+/**
+ * Vuelve a una pantalla anterior. No es lo mismo que mostrarla: algunas hay
+ * que rearmarlas, y de otras hay que salir ordenadamente.
+ */
+function restaurar(panel) {
+  // Salir del recopilatorio suelta los videos que tiene en memoria. Tiene que
+  // pasar tambien cuando se sale con la flecha, no solo con VOLVER.
+  if (!el.recop.classList.contains('hidden') && panel !== 'recop') limpiarRecop();
+
+  // Volver al menu desde una ronda o una sala apaga la camara y corta la sala,
+  // igual que el boton REGRESAR. Sin esto, atras dejaba la camara prendida
+  // —con la luz encendida— y la sala abierta ocupando cupo.
+  if ((panel === 'intro' || panel === 'nombre') && (batalla?.vivo || modo === 'versus' || !el.count.classList.contains('hidden'))) {
+    salirDeSala({ apagarCamara: true });
+  }
+
+  switch (panel) {
+    // Estas dos se rearman: el ranking se vuelve a pedir porque pudo cambiar,
+    // y el recopilatorio tiene que volver a arrancar el reel.
+    case 'rank': abrirRanking(); break;
+    case 'recop': abrirRecop(); break;
+    // El torneo no: el panel sigue pintado tal cual quedo, y volver a pedirlo
+    // haria parpadear la tabla por nada.
+    case 'torneo': torneoDatos ? show('torneo') : show('intro'); break;
+    default: show(panel);
+  }
+}
+
+addEventListener('popstate', (ev) => {
+  volviendo = true;
+  try {
+    const panel = ev.state?.panel;
+    // Sin estado es la entrada con la que se entro al sitio: ahi corresponde
+    // la pantalla de arranque, no adivinar.
+    restaurar(NAVEGABLES.includes(panel) ? panel : (aliasValido(getAlias()) ? 'intro' : 'nombre'));
+  } finally {
+    volviendo = false;
+  }
+});
 
 // ---------- por dónde arranca la app ----------
 //
