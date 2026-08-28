@@ -80,12 +80,13 @@ async function copiar(texto) {
   catch { return false; }
 }
 
-// A donde se manda al que esta en una computadora. TikTok tiene una pagina de
-// subida de verdad; Instagram publica desde la web pero no tiene una URL
-// directa que abra el formulario, asi que va a la portada.
+// A donde se manda al que esta en una computadora: NO a la portada, sino al
+// formulario de subir. Los dos existen y estan verificados; con la sesion
+// abierta se cae directo en la pantalla de elegir archivo, con el video ya
+// descargado y el texto ya copiado.
 const SUBIR = {
-  tiktok: 'https://www.tiktok.com/upload',
-  instagram: 'https://www.instagram.com/',
+  tiktok: 'https://www.tiktok.com/tiktokstudio/upload',
+  instagram: 'https://www.instagram.com/create/select/',
 };
 
 /**
@@ -102,16 +103,27 @@ export async function compartir(blob, datos = {}, red = '') {
   const nombre = nombreArchivo(datos, blob);
 
   if (hayCompartirNativo(blob)) {
+    // EL TEXTO SE COPIA ANTES DE ABRIR LA HOJA, no despues.
+    //
+    // `navigator.share` no resuelve hasta que la persona VUELVE de la app
+    // destino, asi que copiar despues llegaba tarde: para cuando el
+    // portapapeles tenia la leyenda, la persona ya estaba en el editor de
+    // Instagram escribiendola a mano. Ahora, cuando llega al campo de la
+    // descripcion, pegar es un toque.
+    //
+    // Ademas hay que hacerlo ACA por otro motivo: el portapapeles necesita el
+    // gesto del usuario, y en iOS el gesto se considera consumido una vez que
+    // se abrio la hoja de compartir.
+    await copiar(texto);
     try {
       await navigator.share({
         files: [new File([blob], nombre, { type: blob.type })],
         // `text` es lo que la hoja nativa le pasa a la app destino. Instagram
-        // y TikTok lo IGNORAN para video (arman su propio editor), asi que
-        // igual se copia al portapapeles: cuando la persona llega al campo de
-        // la descripcion, pegar es un toque y escribir todo de nuevo, no.
+        // y TikTok lo IGNORAN para video (arman su propio editor), y por eso
+        // el portapapeles de arriba no es redundante: es el unico camino real
+        // para que la leyenda llegue.
         text: texto,
       });
-      copiar(texto);
       return 'compartido';
     } catch (e) {
       // Cancelar es una respuesta valida, no un error: no hay que caerse al
@@ -137,10 +149,12 @@ export async function compartir(blob, datos = {}, red = '') {
 export function mensajeDe(resultado, red) {
   const donde = red === 'tiktok' ? 'TikTok' : red === 'instagram' ? 'Instagram' : '';
   switch (resultado) {
-    case 'compartido': return 'Listo. El texto quedó copiado por si lo querés pegar.';
+    case 'compartido': return donde
+      ? `Elegí ${donde} en la lista. La descripción ya está copiada: pegala y listo.`
+      : 'Listo. La descripción quedó copiada por si la querés pegar.';
     case 'cancelado': return '';
     case 'bajado': return donde
-      ? `Video guardado y texto copiado. Te abrimos ${donde}: subilo desde ahí.`
+      ? `Te abrimos ${donde} para subir. El video está en tus descargas y la descripción, copiada.`
       : 'Guardado. Subilo y etiquetame.';
     default: return '';
   }
